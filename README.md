@@ -1,4 +1,4 @@
-# Calibrated Self-Reward (CSR)
+# Calibration via Semantic Reward (CSR)
 
 This repository contains training and evaluation scripts for the CSR method
 along with two RL baselines (RLVR, RLCR) on multi-hop and open-domain question
