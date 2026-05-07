@@ -1,7 +1,6 @@
 # Calibration via Semantic Reward (CSR)
 
-This repository contains training and evaluation scripts for the CSR method
-along with two RL baselines (RLVR, RLCR) on multi-hop and open-domain question
+This repository contains training and evaluation scripts for the CSR method on multi-hop and open-domain question
 answering. All experiments fine-tune `meta-Llama-3.1-8B-Instruct` with LoRA
 (rank 32) under GRPO using [unsloth](https://github.com/unslothai/unsloth) +
 [TRL](https://github.com/huggingface/trl) and an LLM judge (Azure / OpenAI
