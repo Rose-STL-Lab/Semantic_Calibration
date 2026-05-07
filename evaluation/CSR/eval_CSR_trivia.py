@@ -2,7 +2,7 @@
 # coding: utf-8
 
 # ============================================================
-# NQ Open evaluation for BASE + all LoRA checkpoints
+# TriviaQA evaluation for BASE + all LoRA checkpoints
 # Judge: GPT API (OpenAI-compatible chat completions)
 # - ONE judge prompt (used for BOTH correctness + SAME)
 # - One-line output: "Correct: YES" or "Correct: NO"
@@ -13,9 +13,10 @@
 # ============================================================
 
 import os
+import argparse
 
 # --- HF cache / vLLM env ---
-HF_CACHE = os.environ.get("HF_CACHE", "./hf_cache")
+HF_CACHE = "./hf_cache"
 os.environ["HF_HOME"] = HF_CACHE
 os.environ["HF_DATASETS_CACHE"] = os.path.join(HF_CACHE, "datasets")
 os.environ["HF_HUB_CACHE"] = os.path.join(HF_CACHE, "hub")
@@ -29,7 +30,6 @@ import random
 import numpy as np
 import torch
 import re, time, csv, hashlib, json, string
-import unicodedata
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -40,7 +40,6 @@ from unsloth import FastLanguageModel
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from sklearn.metrics import roc_auc_score
 from scipy.stats import spearmanr, kendalltau
-import matplotlib.pyplot as plt
 
 
 # ===== 0. Seed / Device =====
@@ -52,7 +51,6 @@ torch.cuda.manual_seed_all(SEED)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-print("CUDA_VISIBLE_DEVICES =", os.environ.get("CUDA_VISIBLE_DEVICES"))
 print("device_count =", torch.cuda.device_count())
 print("current_device =", torch.cuda.current_device())
 print("name0 =", torch.cuda.get_device_name(0))
@@ -70,7 +68,7 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     load_in_4bit=True,
     fast_inference=True,
     max_lora_rank=lora_rank,
-    gpu_memory_utilization=0.5,
+    gpu_memory_utilization=0.7,
 )
 
 # --- FIX: decoder-only should use LEFT padding for correct generation ---
@@ -89,12 +87,12 @@ model = FastLanguageModel.get_peft_model(
 
 
 # ============================================================
-# 2) Judge: GPT API (ONE prompt for SAME + one NQ Open correctness prompt)
+# 2) Judge: GPT API (ONE prompt for SAME + one TriviaQA correctness prompt)
 # ============================================================
-JUDGE_MODEL_ID = os.environ.get("OPENAI_DEPLOYMENT_NAME") or os.environ.get("OPENAI_MODEL", "gpt-4.1-nano")
-JUDGE_API_MAX_RETRIES = int(os.environ.get("JUDGE_API_MAX_RETRIES", "2"))
-JUDGE_API_SLEEP_SEC = float(os.environ.get("JUDGE_API_SLEEP_SEC", "1.5"))
-JUDGE_API_MAX_WORKERS = int(os.environ.get("JUDGE_API_MAX_WORKERS", "6"))
+JUDGE_MODEL_ID = "gpt-4.1-nano"
+JUDGE_API_MAX_RETRIES = 2
+JUDGE_API_SLEEP_SEC = 1.5
+JUDGE_API_MAX_WORKERS = 6
 
 def _make_judge_client():
     try:
@@ -104,10 +102,7 @@ def _make_judge_client():
             azure_endpoint=os.environ["OPENAI_AZURE_ENDPOINT"],
         )
     except KeyError:
-        kwargs = {"api_key": os.environ["OPENAI_API_KEY"]}
-        if os.environ.get("OPENAI_BASE_URL"):
-            kwargs["base_url"] = os.environ["OPENAI_BASE_URL"]
-        return OpenAI(**kwargs)
+        return OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 judge_client = _make_judge_client()
 
@@ -127,22 +122,7 @@ Your response should use the following format:
 Correct: <yes or no>
 """.rstrip()
 
-NQ_OPEN_CORRECTNESS_JUDGE_PROMPT = """Given a question, one generated answer, and the gold correct answer, determine whether the generated answer matches the gold answer in meaning. Respond with "yes" or "no".
-Your response should be completely based on the similarity between the generated answer and the gold correct answer.
-DO NOT use your own knowledge base when do the comparison.
-
-Question:
-{q}
-Generated Answer:
-{a}
-Gold Correct Answer:
-{b}
-
-Your response should use the following format:
-Correct: <yes or no>
-""".rstrip()
-
-NQ_OPEN_MULTI_CORRECTNESS_JUDGE_PROMPT = """Given a question, one generated answer, and a list of candidate correct answers, you need to analyze whether the generated answer matches any candidate correct answer. Respond with "yes" or "no".
+TRIVIAQA_CORRECTNESS_JUDGE_PROMPT = """Given a question, one generated answer, and a list of candidate correct answers, you need to analyze whether the generated answer matches any candidate correct answer. Respond with "yes" or "no".
 Your response should be completely based on the similarity between the generated answer and the candidate correct answers.
 DO NOT use your own knowledge base when do the comparison.
 
@@ -220,13 +200,6 @@ def canonicalize_answer(text: str) -> str:
     t = _CANON_TAIL_RE.sub("", t).strip()
     t = _CANON_PREFIX_RE.sub("", t).strip()
     t = re.sub(r"[ \t]*\.\s*$", "", t).strip()
-    return t
-
-def clean_unicode_text(text) -> str:
-    t = unicodedata.normalize("NFKC", str(text or ""))
-    t = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", t)
-    t = re.sub(r"[\u00a0\u2000-\u200a\u202f\u205f\u3000]", " ", t)
-    t = re.sub(r"\s+", " ", t).strip()
     return t
 
 
@@ -504,8 +477,7 @@ def cluster_assignment_entropy(semantic_ids):
     counts = np.bincount(semantic_ids)
     p = counts / n
     ent = -(p * np.log(p + 1e-12)).sum()
-    ent_max = np.log(n)
-    return float(ent / (ent_max + 1e-12))
+    return float(ent)
 
 
 def compute_semantic_entropy(samples, question: str):
@@ -524,13 +496,10 @@ def compute_semantic_entropy(samples, question: str):
 # ============================================================
 # 6) Prompting
 # ============================================================
-# SYSTEM_PROMPT = "Provide a concise and direct answer to the question. Avoid unnecessary explanations or additional text. Then give a single final answer in the format: Final answer: <answer>."
-
 SYSTEM_PROMPT = (
     "Provide a concise and direct answer to the question. "
     "Avoid unnecessary explanations or additional text."
 )
-
 
 _DEBUG_QUESTION = "Who wrote Hamlet?"
 _DEBUG_MSGS = [
@@ -561,35 +530,26 @@ def render_generation_prompt(prompt_messages, tokenizer):
 
 
 # ============================================================
-# 7) Dataset (NQ Open)
+# 7) Dataset (TriviaQA)
 # ============================================================
-raw = load_dataset("google-research-datasets/nq_open")
-if "validation" in raw:
-    validation_raw = raw["validation"]
-elif "test" in raw:
-    validation_raw = raw["test"]
-elif "train" in raw:
-    validation_raw = raw["train"]
-else:
-    first_split = next(iter(raw.keys()))
-    validation_raw = raw[first_split]
+raw = load_dataset("mandarjoshi/trivia_qa", "rc.web.nocontext")
+train_raw = raw["train"]
+validation_raw = raw["validation"]
 
 def convert_to_item(ex):
-    question = clean_unicode_text(ex["question"])
-    raw_answer = ex["answer"]
-    if isinstance(raw_answer, list):
-        gold_answer = [clean_unicode_text(a) for a in raw_answer]
-    else:
-        gold_answer = clean_unicode_text(raw_answer)
+    aliases = list(ex["answer"].get("normalized_aliases", []))
+    aliases.extend([normalize_answer(a) for a in ex["answer"].get("human_answers", [])])
+    aliases = [a for a in aliases if a]
     return {
         "prompt": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": question},
+            {"role": "user", "content": ex["question"]},
         ],
-        "answer": gold_answer,
-        "question": question,
+        "answer": aliases,
+        "question": ex["question"],
         "meta": {
-            "metadata": ex.get("metadata", ""),
+            "question_id": ex.get("question_id", ""),
+            "question_source": ex.get("question_source", ""),
         },
     }
 
@@ -639,41 +599,6 @@ def load_jsonl_rows(jsonl_path: str) -> list[dict]:
             if line:
                 rows.append(json.loads(line))
     return rows
-
-
-def plot_reliability_diagram(confs, p_hats, n_bins=10, title="Reliability Diagram", save_path=None):
-    confs = np.asarray(confs, dtype=float)
-    p_hats = np.asarray(p_hats, dtype=float)
-
-    bins = np.linspace(0.0, 1.0, n_bins + 1)
-    bin_centers = (bins[:-1] + bins[1:]) / 2.0
-
-    accs = np.full(n_bins, np.nan, dtype=float)
-    counts = np.zeros(n_bins, dtype=int)
-
-    for i in range(n_bins):
-        lo, hi = bins[i], bins[i + 1]
-        mask = (confs >= lo) & (confs < hi if i < n_bins - 1 else confs <= hi)
-        counts[i] = int(mask.sum())
-        if counts[i] > 0:
-            accs[i] = float(np.mean(p_hats[mask]))
-
-    plt.figure()
-    plt.plot([0, 1], [0, 1])
-    plt.bar(bin_centers, accs, width=(1.0 / n_bins), alpha=0.6, edgecolor="black")
-    plt.xlabel("Confidence")
-    plt.ylabel("Accuracy (mean correctness p_hat)")
-    plt.title(title)
-
-    for x, y, cnt in zip(bin_centers, accs, counts):
-        if not np.isnan(y):
-            plt.text(x, y, str(cnt), ha="center", va="bottom", fontsize=8)
-
-    plt.tight_layout()
-    if save_path is not None:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    plt.close()
-    return {"accs": accs, "counts": counts}
 
 
 # ============================================================
@@ -753,13 +678,13 @@ def generate_k_and_semantic_confidence_for_eval(
     max_new_tokens: int = EVAL_MAX_NEW_TOKENS,
     temperature: float = 0.7,
     top_p: float = 0.95,
-        gold_answer: str | None = None,
-        question: str | None = None,
+    gold_answer: list[str] | None = None,
+    question: str | None = None,
 ):
     model.eval()
 
     samples = []
-    if hasattr(model, "fast_generate"):
+    if hasattr(model, "fast_generate") and lora_request is not None:
         from vllm import SamplingParams
         sampling_params = SamplingParams(
             n=int(k),
@@ -792,17 +717,12 @@ def generate_k_and_semantic_confidence_for_eval(
     # semantic uncertainty -> confidence
     q_for_entropy = question or ""
     H = compute_semantic_entropy(samples, question=q_for_entropy)
-    conf_hat = float(1.0 - H)
+    conf_hat = float(np.exp(-H))
 
     # correctness for each sample (compare generated answer to candidate correct answers)
     labels_k = None
     if gold_answer is not None:
-        if isinstance(gold_answer, list):
-            gold_clean = "; ".join(normalize_for_equiv(g) for g in gold_answer if g)
-            judge_prompt = NQ_OPEN_MULTI_CORRECTNESS_JUDGE_PROMPT
-        else:
-            gold_clean = normalize_for_equiv(gold_answer)
-            judge_prompt = NQ_OPEN_CORRECTNESS_JUDGE_PROMPT
+        gold_clean = "; ".join(normalize_for_equiv(g) for g in gold_answer if g)
         samples_clean = [normalize_for_equiv(s) for s in samples]
         q_list = [question or ""] * len(samples_clean)
 
@@ -810,7 +730,7 @@ def generate_k_and_semantic_confidence_for_eval(
             preds=samples_clean,
             golds=[gold_clean] * len(samples_clean),
             questions=q_list,
-            prompt_template=judge_prompt,
+            prompt_template=TRIVIAQA_CORRECTNESS_JUDGE_PROMPT,
             max_new_tokens=16,
             batch_size=16,
             max_retries=2,
@@ -858,7 +778,7 @@ def evaluate_model_on_dataset(
                 confs.append(conf_hat)
             print(f"[Resume] loaded {start_idx} existing cases from {jsonl_path}")
 
-    for i in tqdm(range(start_idx, n), desc=f"RLSC Eval NQOpen (mean@{k})", total=n):
+    for i in tqdm(range(start_idx, n), desc=f"CSR Eval TriviaQA (mean@{k})", total=n):
         ex = ds[i]
         q = ex["question"]
         gold = ex["answer"]
@@ -876,11 +796,6 @@ def evaluate_model_on_dataset(
         )
 
         samples = out["samples"]
-        if i < 3:
-            extracted_samples = [extract_completion_text(s) for s in samples]
-            print(f"[DebugExtract] question_{i+1}= {q}")
-            print(f"[DebugExtract] raw_samples_{i+1}= {samples}")
-            print(f"[DebugExtract] extracted_samples_{i+1}= {extracted_samples}")
         conf_hat = out["conf_hat"]
         labels_k = out["labels_k"] or [0] * len(samples)
 
@@ -911,7 +826,7 @@ def evaluate_model_on_dataset(
             ece_so_far = expected_calibration_error(confs, p_hats, n_bins=ECE_BINS)
             auroc_so_far = safe_auc(p_hats, confs)
             tqdm.write(
-                f"[RLSC Eval NQOpen] {total}/{n} | acc_so_far={acc_so_far:.4f} | "
+                f"[CSR Eval TriviaQA] {total}/{n} | acc_so_far={acc_so_far:.4f} | "
                 f"ece_so_far={ece_so_far:.4f} | "
                 f"auroc_so_far={auroc_so_far if auroc_so_far is not None else 'NA'}"
             )
@@ -924,7 +839,7 @@ def evaluate_model_on_dataset(
     kendall = safe_kendall(confs, p_hats)
 
     print(
-        f"[RLSC Eval NQOpen] N={total}  Acc_mean@{k}={acc:.4f}  "
+        f"[CSR Eval TriviaQA] N={total}  Acc_mean@{k}={acc:.4f}  "
         f"ECE_soft({ECE_BINS}-bin)={ece:.4f}  "
         f"Brier_soft(MSE)={brier:.4f}  "
         f"Spearman={spearman if spearman is not None else 'NA'}  "
@@ -947,61 +862,6 @@ def evaluate_model_on_dataset(
         "p_hats": p_hats,
         "cases": cases,
     }
-
-
-@torch.inference_mode()
-def preview_initial_generations(
-    ds,
-    model,
-    tokenizer,
-    lora_request=None,
-    num_samples: int = 3,
-):
-    print("\n===== NQ OPEN PREVIEW SAMPLES =====")
-    n = min(num_samples, len(ds))
-    for i in range(n):
-        ex = ds[i]
-        q = ex["question"]
-        gold = ex["answer"]
-        prompt = render_generation_prompt(ex["prompt"], tokenizer)
-
-        if hasattr(model, "fast_generate"):
-            from vllm import SamplingParams
-            sampling_params = SamplingParams(
-                n=1,
-                temperature=0.0,
-                top_p=1.0,
-                max_tokens=int(EVAL_MAX_NEW_TOKENS),
-                seed=SEED,
-            )
-            outs = model.fast_generate([prompt], sampling_params=sampling_params, lora_request=lora_request)
-            raw_text = outs[0].outputs[0].text
-        else:
-            model_dev = next(model.parameters()).device
-            enc = tokenizer(prompt, return_tensors="pt").to(model_dev)
-            in_len = enc["input_ids"].shape[-1]
-            out = model.generate(
-                **enc,
-                do_sample=False,
-                temperature=0.0,
-                top_p=1.0,
-                max_new_tokens=EVAL_MAX_NEW_TOKENS,
-                eos_token_id=tokenizer.eos_token_id,
-                pad_token_id=tokenizer.pad_token_id,
-                use_cache=True,
-            )
-            gen_ids = out[0, in_len:]
-            raw_text = tokenizer.decode(gen_ids, skip_special_tokens=False)
-
-        cleaned_text = extract_completion_text(raw_text)
-        print(f"\n----- sample {i + 1} -----")
-        print("question:", q)
-        print("gold answer:", gold)
-        print("raw generation:")
-        print(raw_text)
-        print("cleaned generation:")
-        print(cleaned_text)
-    print("===== END PREVIEW =====\n")
 
 
 # ============================================================
@@ -1032,14 +892,18 @@ def list_checkpoints_sorted(root_or_ckpt_path: str):
 # 12) Run eval for BASE + all checkpoints
 # ============================================================
 num_rollout = 8
-mode = "RLSC"  # distinguish filename
+mode = "CSR"  # distinguish filename
 
 # Path to a single LoRA checkpoint, or to a directory containing CHECKPOINT_NAMES.
-LORA_ROOT_PATH = os.environ.get("LORA_ROOT_PATH", "./outputs/checkpoint-2500")
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--lora-path", dest="lora_path", default=None,
+                     help="Path to LoRA adapter checkpoint. Omit for base-model eval.")
+_args, _ = _parser.parse_known_args()
+LORA_ROOT_PATH = _args.lora_path  # None => base eval
 
 chosen_ds = validation_ds  # aligned with training-time validation
 
-OUT_CSV = os.path.join(os.path.dirname(__file__), f"nq_open_eval_{mode}.csv")
+OUT_CSV = os.path.join(os.path.dirname(__file__), f"triviaqa_eval_{mode}.csv")
 ECE_BINS = 10
 
 csv_header = [
@@ -1055,7 +919,6 @@ csv_header = [
     "spearman",
     "kendall",
     "auroc_conf",
-    "plot_path",
     "judge_total",
     "judge_unparsed",
     "judge_unparsed_rate",
@@ -1065,12 +928,12 @@ csv_header = [
     "judge_cache_size",
 ]
 
-if LORA_ROOT_PATH is None:
-    ckpt_paths = []
-else:
-    ckpt_paths = list_checkpoints_sorted(LORA_ROOT_PATH)
+ckpt_paths = list_checkpoints_sorted(LORA_ROOT_PATH) if LORA_ROOT_PATH else []
 
-run_items = [("BASE", None)] + [(p, p) for p in ckpt_paths]
+if LORA_ROOT_PATH:
+    run_items = [(p, p) for p in ckpt_paths]
+else:
+    run_items = [("BASE", None)]
 
 
 print("[EVAL] will run:", len(run_items), "models")
@@ -1088,7 +951,7 @@ for run_tag, lora_dir in run_items:
     # JUDGE_CACHE.clear_all()
 
     if lora_dir is None:
-        print("[EVAL] Running RLSC (no LoRA)")
+        print("[EVAL] Running BASE (no LoRA)")
         lora_request = None
         ckpt_name = "BASE"
         step = 0
@@ -1103,16 +966,8 @@ for run_tag, lora_dir in run_items:
 
     model = model.eval()
 
-    preview_initial_generations(
-        ds=chosen_ds,
-        model=model,
-        tokenizer=tokenizer,
-        lora_request=lora_request,
-        num_samples=3,
-    )
-
     safe_tag = re.sub(r"[^A-Za-z0-9._-]+", "_", ckpt_name)
-    jsonl_path = os.path.join(os.path.dirname(__file__), f"nq_open_{safe_tag}.jsonl")
+    jsonl_path = os.path.join(os.path.dirname(__file__), f"triviaqa_{safe_tag}.jsonl")
 
     ft_metrics = evaluate_model_on_dataset(
         ds=chosen_ds,
@@ -1123,17 +978,7 @@ for run_tag, lora_dir in run_items:
         limit=len(chosen_ds),
         show_n=2,
         jsonl_path=jsonl_path,
-        jsonl_flush_every=50,
-    )
-
-    plot_path = os.path.join(os.path.dirname(__file__), f"figures_{mode}", f"nq_open_{mode}_reliability_{ckpt_name}_{len(chosen_ds)}.png")
-    os.makedirs(os.path.dirname(plot_path), exist_ok=True)
-    plot_reliability_diagram(
-        confs=ft_metrics["confs"],
-        p_hats=ft_metrics["p_hats"],
-        n_bins=ECE_BINS,
-        title=f"Reliability ({len(chosen_ds)}) | {ckpt_name}",
-        save_path=plot_path,
+        jsonl_flush_every=20,
     )
 
     tot = int(JUDGE_STATS["total"])
@@ -1158,7 +1003,6 @@ for run_tag, lora_dir in run_items:
         "spearman": "" if ft_metrics["spearman"] is None else ft_metrics["spearman"],
         "kendall": "" if ft_metrics["kendall"] is None else ft_metrics["kendall"],
         "auroc_conf": "" if ft_metrics["auroc_conf"] is None else ft_metrics["auroc_conf"],
-        "plot_path": plot_path,
         "judge_total": tot,
         "judge_unparsed": unp,
         "judge_unparsed_rate": unp_rate,
@@ -1170,7 +1014,6 @@ for run_tag, lora_dir in run_items:
 
     print(f"[Saved] metrics -> {OUT_CSV}")
     print(f"[Saved] jsonl   -> {jsonl_path}")
-    print(f"[Saved] plot    -> {plot_path}")
 
     if unp > 0:
         ex0 = JUDGE_STATS["examples"][0] if JUDGE_STATS["examples"] else None

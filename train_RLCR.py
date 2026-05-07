@@ -27,7 +27,7 @@ from trl import GRPOConfig, GRPOTrainer
 # ============================================================
 # 0) Env / seed / device
 # ============================================================
-HF_CACHE = os.environ.get("HF_CACHE", "./hf_cache")
+HF_CACHE = "./hf_cache"
 os.environ["HF_HOME"] = HF_CACHE
 os.environ["HF_HUB_CACHE"] = os.path.join(HF_CACHE, "hub")
 os.environ["HF_DATASETS_CACHE"] = os.path.join(HF_CACHE, "datasets")
@@ -42,10 +42,8 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 torch.cuda.manual_seed_all(SEED)
 
-VLLM_SERVER_BASE_URL = os.environ.get("VLLM_SERVER_BASE_URL", "http://127.0.0.1:8000")
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("CUDA_VISIBLE_DEVICES =", os.environ.get("CUDA_VISIBLE_DEVICES"))
 print("device_count =", torch.cuda.device_count())
 print("current_device =", torch.cuda.current_device())
 print("name0 =", torch.cuda.get_device_name(0))

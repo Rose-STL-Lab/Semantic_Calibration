@@ -1,37 +1,44 @@
 # Calibration via Semantic Reward (CSR)
 
-This repository contains training and evaluation scripts for the CSR method on multi-hop and open-domain question
-answering. All experiments fine-tune `meta-Llama-3.1-8B-Instruct` with LoRA
-(rank 32) under GRPO using [unsloth](https://github.com/unslothai/unsloth) +
+This repository contains training and evaluation scripts for the CSR method
+together with the four comparison points used in our experiments —
+**Base** (frozen `meta-Llama-3.1-8B-Instruct`), **RLVR**, **RD**, **RLCR**,
+**CSR** — on multi-hop and open-domain question answering. All trainable
+methods fine-tune `meta-Llama-3.1-8B-Instruct` with LoRA (rank 32) under GRPO
+using [unsloth](https://github.com/unslothai/unsloth) +
 [TRL](https://github.com/huggingface/trl) and an LLM judge (Azure / OpenAI
-chat-completions API) for correctness scoring.
+chat-completions API) for correctness scoring. RD checkpoints are produced by
+the upstream
+[Rewarding Doubt](https://github.com/pasta99/RewardingDoubt) repository
+unmodified.
 
 ## Layout
 
 ```
 ├── train_CSR.py            # CSR: GRPO with linear-ramp semantic calibration + correctness reward
-├── train_RLVR.py           # Baseline: GRPO with correctness reward only
-├── train_RLCR.py           # Baseline: RLCR ported to unsloth/GRPO
-├── eval_RLSC_hotpot.py     # Self-consistency eval on HotpotQA (distractor)
-├── eval_RLSC_msmarco.py    # Self-consistency eval on MS MARCO v1.1
-├── eval_RLSC_nq_open.py    # Self-consistency eval on Natural Questions Open
-└── eval_RLSC_trivia.py     # Self-consistency eval on TriviaQA (rc.web.nocontext)
+├── train_RLVR.py           # RLVR baseline: GRPO with correctness reward only
+├── train_RLCR.py           # RLCR baseline: ported to unsloth/GRPO
+└── evaluation/
+    ├── Base/               # Frozen base model, no LoRA
+    │   └── eval_Base_{hotpot,msmarco,nq_open,trivia}.py
+    ├── RLVR/               # Semantic confidence eval, loads RLVR LoRA
+    │   └── eval_RLVR_{hotpot,msmarco,nq_open,trivia}.py
+    ├── RD/                 # Verbalized confidence eval (RD format)
+    │   └── eval_RD_{hotpot,msmarco,nq_open,trivia}.py
+    ├── RLCR/               # Verbalized confidence eval (RLCR format)
+    │   └── eval_RLCR_{hotpot,msmarco,nq_open,trivia}.py
+    └── CSR/                # Semantic confidence eval, loads CSR LoRA
+        └── eval_CSR_{hotpot,msmarco,nq_open,trivia}.py
 ```
 
-Each file is self-contained: data loading, reward functions, training/eval
-loops, and CSV/JSONL/plot output are all in one script.
-
-## Methods at a glance
-
-| Script | Reward signal |
-| --- | --- |
-| `train_CSR.py` | `cali_w(t) * calibration + 1.0 * correctness`, with `cali_w(t)` linearly ramped from `0.1` to `--cali-w` (default `0.2`) over training |
-| `train_RLVR.py` | Correctness only |
-| `train_RLCR.py` | RLCR's five rewards (`format`, `accuracy`, `brier`, `mean_confidence`, `confidence_one_or_zero`) with weights `[0.5, 0.5, 0.5, 1e-6, 1e-6]` |
-
-`train_CSR.py` and `train_RLVR.py` use a GPT judge (one-line `Correct: YES/NO`)
-to score correctness. `train_RLCR.py` uses exact-match against gold and parses
-the `<answer>` / `<confidence>` tags emitted by the model.
+`evaluation/Base/` runs the frozen base model with no LoRA loaded.
+`evaluation/RLVR/` and `evaluation/CSR/` use the same semantic confidence
+confidence proxy (`exp(-H)` over `K=8` semantic clusters) and only differ in
+which LoRA checkpoint is loaded via `LORA_ROOT_PATH`.
+`evaluation/RD/` and `evaluation/RLCR/` parse the verbalized confidence
+emitted by their respective formats. Each file is self-contained: data
+loading, reward functions, training/eval loops, and CSV/JSONL/plot output
+are all in one script.
 
 ## Setup
 
@@ -42,40 +49,32 @@ The full conda environment used for all experiments is exported to
 
 ```bash
 conda env create -f environment.yml
-conda activate unsloth
+conda activate csr
 ```
 
 ### Environment variables
 
-Caches and paths (all optional; defaults shown):
+LoRA checkpoint paths are passed per-eval-script via `--lora-path` (see
+[Evaluation](#evaluation) below). All other knobs (HF cache directory, judge
+model id, retry / sleep / worker counts) are hardcoded inside the scripts.
+
+Judge API key (required for `train_CSR.py`, `train_RLVR.py`, and every
+`evaluation/*/eval_*.py` script):
 
 ```bash
-export HF_CACHE=./hf_cache                    # HF Hub / datasets / transformers cache
-export LORA_ROOT_PATH=./outputs/checkpoint-2500   # checkpoint to evaluate (eval scripts only)
-```
-
-Judge API (required for `train_CSR.py`, `train_RLVR.py`, all `eval_RLSC_*.py`):
-
-```bash
-# Option A: Azure OpenAI
+# Azure OpenAI: set all three
 export OPENAI_API_KEY=...
 export OPENAI_API_VERSION=2024-08-01-preview
 export OPENAI_AZURE_ENDPOINT=https://<your-endpoint>.openai.azure.com
-export OPENAI_DEPLOYMENT_NAME=gpt-4.1-nano
 
-# Option B: OpenAI / OpenAI-compatible
+# Plain OpenAI: only OPENAI_API_KEY is required.
 export OPENAI_API_KEY=...
-export OPENAI_BASE_URL=https://api.openai.com/v1   # optional, defaults to OpenAI
-export OPENAI_MODEL=gpt-4.1-nano
 ```
 
-Optional judge tuning:
-
-```bash
-export JUDGE_API_MAX_RETRIES=2
-export JUDGE_API_SLEEP_SEC=1.5
-export JUDGE_API_MAX_WORKERS=6
-```
+The judge model is hardcoded to `gpt-4.1-nano`. Edit `JUDGE_MODEL_ID` in
+each script (or the `model_name` constant in the RD/RLCR `api_yesno_judge`
+helpers) to use a different model. The HF cache directory is hardcoded to
+`./hf_cache`.
 
 ## Training
 
@@ -109,26 +108,43 @@ Common training settings (GRPO):
 
 ## Evaluation
 
-The four `eval_RLSC_*.py` scripts evaluate a checkpoint with self-consistency
-sampling (`num_rollout = 8`), then compute accuracy, ECE, Brier, Spearman ρ,
-Kendall τ, and AUROC of confidence vs. correctness. Each writes:
+Each `evaluation/<METHOD>/eval_<METHOD>_<dataset>.py` script evaluates the corresponding
+method on **1 000 validation examples per dataset**, then computes accuracy,
+ECE, Brier, Spearman ρ, Kendall τ, and AUROC of confidence vs. correctness.
+Each writes:
 
-* `<dataset>_eval_RLSC.csv` — one row per checkpoint
+* `<dataset>_eval_<METHOD>.csv` — one row per evaluated model
 * `<dataset>_<ckpt>.jsonl` — per-example predictions and judge labels
-* `figures_RLSC/<dataset>_RLSC_reliability_<ckpt>_<n>.png` — reliability diagram
 
-Point `LORA_ROOT_PATH` at either a single checkpoint directory (e.g.
-`outputs_CSR_0.2/checkpoint-2500`) or a parent directory; in the latter case
-the script iterates over the names listed in `CHECKPOINT_NAMES` near the bottom
-of each file. The base model (no LoRA) is always evaluated first, so every run
-produces one `BASE` row in the CSV alongside the checkpoint rows.
+The five method folders use two different confidence proxies, but a unified
+checkpoint interface:
+
+* **Base / RLVR / CSR** (semantic confidence proxy): confidence is estimated
+  from the semantic-cluster distribution of `K=8` rollouts.
+* **RD / RLCR** (verbalized confidence): confidence is parsed from the
+  model's output (RD: `Confidence: <int>`; RLCR: `<confidence>...</confidence>`).
+
+For `RLVR / RD / RLCR / CSR`, the LoRA checkpoint is passed via the
+`--lora-path` CLI argument. **If `--lora-path` is omitted, the script
+evaluates the base model (no LoRA loaded).** `Base/` is hard-wired to
+base-only and accepts no LoRA argument.
 
 ```bash
-LORA_ROOT_PATH=outputs_CSR_0.2/checkpoint-2500 python eval_RLSC_hotpot.py
-LORA_ROOT_PATH=outputs_CSR_0.2/checkpoint-2500 python eval_RLSC_nq_open.py
-LORA_ROOT_PATH=outputs_CSR_0.2/checkpoint-2500 python eval_RLSC_trivia.py
-LORA_ROOT_PATH=outputs_CSR_0.2/checkpoint-2500 python eval_RLSC_msmarco.py
+# Base — frozen model
+python evaluation/Base/eval_Base_hotpot.py
+
+# RLVR / RD / RLCR / CSR — pass the LoRA checkpoint dir with --lora-path
+python evaluation/RLVR/eval_RLVR_hotpot.py   --lora-path outputs_RLVR/checkpoint-2500
+python evaluation/RD/eval_RD_hotpot.py       --lora-path /path/to/rd/checkpoint
+python evaluation/RLCR/eval_RLCR_hotpot.py   --lora-path /path/to/rlcr/checkpoint
+python evaluation/CSR/eval_CSR_hotpot.py     --lora-path outputs_CSR_0.2/checkpoint-2500
+
+# Same scripts run without --lora-path fall back to base eval.
+python evaluation/RLVR/eval_RLVR_hotpot.py    # → BASE row in CSV
 ```
+
+Substitute `_hotpot.py` with `_msmarco.py`, `_nq_open.py`, or `_trivia.py`
+for the other datasets.
 
 ## Datasets
 
@@ -137,11 +153,10 @@ download is needed once `HF_CACHE` is set.
 
 | Script | Dataset |
 | --- | --- |
-| `train_CSR.py`, `train_RLVR.py`, `eval_RLSC_hotpot.py` | `hotpot_qa` (`distractor`) |
-| `train_RLCR.py` | `hotpot_qa` (`distractor`) |
-| `eval_RLSC_msmarco.py` | `microsoft/ms_marco` (`v1.1`) |
-| `eval_RLSC_nq_open.py` | `google-research-datasets/nq_open` |
-| `eval_RLSC_trivia.py` | `mandarjoshi/trivia_qa` (`rc.web.nocontext`) |
+| Training scripts and `evaluation/*/eval_*_hotpot.py` | `hotpot_qa` (`distractor`) |
+| `evaluation/*/eval_*_msmarco.py` | `microsoft/ms_marco` (`v1.1`) |
+| `evaluation/*/eval_*_nq_open.py` | `google-research-datasets/nq_open` |
+| `evaluation/*/eval_*_trivia.py` | `mandarjoshi/trivia_qa` (`rc.web.nocontext`) |
 
 ## Reproducibility notes
 
@@ -160,6 +175,9 @@ download is needed once `HF_CACHE` is set.
 
 * RLCR baseline (`train_RLCR.py`) — ported from
   [github.com/damanimehul/RLCR](https://github.com/damanimehul/RLCR).
-* Rewarding Doubt (RD) reference implementation —
+* RD baseline — trained with the upstream
   [github.com/pasta99/RewardingDoubt](https://github.com/pasta99/RewardingDoubt)
-  ([arXiv:2503.02623](https://arxiv.org/abs/2503.02623)).
+  repository unmodified
+  ([arXiv:2503.02623](https://arxiv.org/abs/2503.02623)). Evaluation of RD
+  checkpoints uses the verbalized-confidence parser in
+  [`evaluation/RD/`](evaluation/RD/).

@@ -1,4 +1,4 @@
-name: unsloth
+name: csr
 channels:
   - defaults
 dependencies:
@@ -153,7 +153,6 @@ dependencies:
       - marshmallow==4.3.0
       - marshmallow-jsonschema-2==0.1.0
       - marshmallow-union==0.1.15.post1
-      - matplotlib==3.10.8
       - mdurl==0.1.2
       - mistral-common==1.8.8
       - model-hosting-container-standards==0.1.13

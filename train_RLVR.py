@@ -36,7 +36,7 @@ from trl import GRPOConfig, GRPOTrainer
 # -----------------------------
 # HF / vLLM cache env
 # -----------------------------
-HF_CACHE = os.environ.get("HF_CACHE", "./hf_cache")
+HF_CACHE = "./hf_cache"
 os.environ["HF_HOME"] = HF_CACHE
 os.environ["HF_HUB_CACHE"] = os.path.join(HF_CACHE, "hub")
 os.environ["HF_DATASETS_CACHE"] = os.path.join(HF_CACHE, "datasets")
@@ -56,7 +56,6 @@ torch.cuda.manual_seed_all(SEED)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-print("CUDA_VISIBLE_DEVICES =", os.environ.get("CUDA_VISIBLE_DEVICES"))
 print("device_count =", torch.cuda.device_count())
 print("current_device =", torch.cuda.current_device())
 print("name0 =", torch.cuda.get_device_name(0))
@@ -99,10 +98,10 @@ model = FastLanguageModel.get_peft_model(
 # ============================================================
 # 2) Judge API client + prompt (single format)
 # ============================================================
-JUDGE_MODEL_ID = os.environ.get("OPENAI_DEPLOYMENT_NAME") or os.environ.get("OPENAI_MODEL", "gpt-4.1-nano")
-JUDGE_API_MAX_RETRIES = int(os.environ.get("JUDGE_API_MAX_RETRIES", "2"))
-JUDGE_API_SLEEP_SEC = float(os.environ.get("JUDGE_API_SLEEP_SEC", "1.5"))
-JUDGE_API_MAX_WORKERS = int(os.environ.get("JUDGE_API_MAX_WORKERS", "6"))
+JUDGE_MODEL_ID = "gpt-4.1-nano"
+JUDGE_API_MAX_RETRIES = 2
+JUDGE_API_SLEEP_SEC = 1.5
+JUDGE_API_MAX_WORKERS = 6
 
 def _make_judge_client():
     try:
@@ -112,10 +111,7 @@ def _make_judge_client():
             azure_endpoint=os.environ["OPENAI_AZURE_ENDPOINT"],
         )
     except KeyError:
-        kwargs = {"api_key": os.environ["OPENAI_API_KEY"]}
-        if os.environ.get("OPENAI_BASE_URL"):
-            kwargs["base_url"] = os.environ["OPENAI_BASE_URL"]
-        return OpenAI(**kwargs)
+        return OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 judge_client = _make_judge_client()
 
