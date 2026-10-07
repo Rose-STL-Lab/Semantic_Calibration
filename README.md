@@ -1,183 +1,262 @@
-# Calibration via Semantic Reward (CSR)
+<h1 align="center">Calibrating LLMs with Semantic-level Reward</h1>
+<p align="center">
+    <img src="https://img.shields.io/badge/NeurIPS'26-blue" alt="NeurIPS 2026">
+    <img src="https://img.shields.io/badge/python-3.11-blue" alt="python">
+    <img src="https://img.shields.io/badge/PyTorch-2.9-ee4c2c" alt="pytorch">
+</p>
 
-This repository contains training and evaluation scripts for the CSR method
-together with the four comparison points used in our experiments —
-**Base** (frozen `meta-Llama-3.1-8B-Instruct`), **RLVR**, **RD**, **RLCR**,
-**CSR** — on multi-hop and open-domain question answering. All trainable
-methods fine-tune `meta-Llama-3.1-8B-Instruct` with LoRA (rank 32) under GRPO
-using [unsloth](https://github.com/unslothai/unsloth) +
-[TRL](https://github.com/huggingface/trl) and an LLM judge (Azure / OpenAI
-chat-completions API) for correctness scoring. RD checkpoints are produced by
-the upstream
-[Rewarding Doubt](https://github.com/pasta99/RewardingDoubt) repository
-unmodified.
+Hi, this is the code for our NeurIPS 2026 paper: *Calibrating LLMs with Semantic-level
+Reward*.
 
-## Layout
+![Overview of CSR](assets/CSR_overview.png)
 
-```
-├── train_CSR.py            # CSR: GRPO with linear-ramp semantic calibration + correctness reward
-├── train_RLVR.py           # RLVR baseline: GRPO with correctness reward only
-├── train_RLCR.py           # RLCR baseline: ported to unsloth/GRPO
-└── evaluation/
-    ├── Base/               # Frozen base model, no LoRA
-    │   └── eval_Base_{hotpot,msmarco,nq_open,trivia}.py
-    ├── RLVR/               # Semantic confidence eval, loads RLVR LoRA
-    │   └── eval_RLVR_{hotpot,msmarco,nq_open,trivia}.py
-    ├── RD/                 # Verbalized confidence eval (RD format)
-    │   └── eval_RD_{hotpot,msmarco,nq_open,trivia}.py
-    ├── RLCR/               # Verbalized confidence eval (RLCR format)
-    │   └── eval_RLCR_{hotpot,msmarco,nq_open,trivia}.py
-    └── CSR/                # Semantic confidence eval, loads CSR LoRA
-        └── eval_CSR_{hotpot,msmarco,nq_open,trivia}.py
-```
+**Overview of CSR.** For each question $x$ we draw $K$ rollouts from the policy
+$\pi_\theta$, score each rollout with a verifiable correctness reward
+$r_{\mathrm{RLVR}}$ and a semantic calibration reward $r_{\mathrm{Calibration}}$, and
+update the policy via group-relative advantages. CSR concentrates correct rollouts into
+a tight semantic cluster while keeping incorrect rollouts dispersed, so that semantic
+agreement among sampled outputs becomes an informative signal of correctness.
 
-`evaluation/Base/` runs the frozen base model with no LoRA loaded.
-`evaluation/RLVR/` and `evaluation/CSR/` use the same semantic confidence
-confidence proxy (`exp(-H)` over `K=8` semantic clusters) and only differ in
-which LoRA checkpoint is loaded via `LORA_ROOT_PATH`.
-`evaluation/RD/` and `evaluation/RLCR/` parse the verbalized confidence
-emitted by their respective formats. Each file is self-contained: data
-loading, reward functions, training/eval loops, and CSV/JSONL/plot output
-are all in one script.
+Confidence is read off the rollouts as `c(x) = exp(-SE(x))`, the exponential of the
+semantic entropy, so the model never emits a confidence token. Both reward terms live
+on `[0, 1]`, which makes their weights directly comparable.
 
-## Setup
+This repository holds the training code, the evaluation code, and the post-hoc
+estimators reported in the appendix.
 
-### Dependencies
+| Path | What it is |
+| --- | --- |
+| `csr/` | The library: rewards, semantic clustering, judge client, config loader, metrics |
+| `train/` | One trainer per method — `train_CSR.py`, `train_RLVR.py`, `train_RLCR.py`, `train_RD.py` |
+| `evaluation/` | `eval_semantic.py` (sampling-based) and `eval_verbalized.py` (verbalized-confidence baselines) |
+| `configs/` | YAML defaults, split into `methods/`, `models/`, `datasets/`, plus `judge.yaml` |
+| `analysis/` | Post-hoc estimators and aggregation rules reported in the appendix |
+| `scripts/` | `train.sh`, `eval.sh`, `serve/serve_judge.sh`, and result collection |
+| `rd_util/` | Utilities for the Rewarding-Doubt baseline, kept close to upstream |
+| `tests/` | Unit tests for the calibration reward, the F1 judge and batching |
 
-The full conda environment used for all experiments is exported to
-[`environment.yml`](environment.yml). Recreate it with:
+# Getting started
+
+## 1. Setup Environment
+
+We conducted all experiments on NVIDIA A100 80GB PCIe GPUs. Each training or
+evaluation run uses a single GPU. The software environment is Python 3.11.14,
+PyTorch 2.9.0 and CUDA 12.8.
+
+To create the conda environment with all the required dependencies, run:
 
 ```bash
 conda env create -f environment.yml
 conda activate csr
 ```
 
-### Environment variables
-
-LoRA checkpoint paths are passed per-eval-script via `--lora-path` (see
-[Evaluation](#evaluation) below). All other knobs (HF cache directory, judge
-model id, retry / sleep / worker counts) are hardcoded inside the scripts.
-
-Judge API key (required for `train_CSR.py`, `train_RLVR.py`, and every
-`evaluation/*/eval_*.py` script):
+The Rewarding-Doubt baseline pins an older stack (Python 3.10.20, PyTorch 2.5.1,
+CUDA 12.4), so it gets a second environment. Activate it only for `train_RD.py`:
 
 ```bash
-# Azure OpenAI: set all three
-export OPENAI_API_KEY=...
-export OPENAI_API_VERSION=2024-08-01-preview
-export OPENAI_AZURE_ENDPOINT=https://<your-endpoint>.openai.azure.com
-
-# Plain OpenAI: only OPENAI_API_KEY is required.
-export OPENAI_API_KEY=...
+conda env create -f environment-rd.yml
 ```
 
-The judge model is hardcoded to `gpt-4.1-nano`. Edit `JUDGE_MODEL_ID` in
-each script (or the `model_name` constant in the RD/RLCR `api_yesno_judge`
-helpers) to use a different model. The HF cache directory is hardcoded to
-`./hf_cache`.
+## 2. Setup the Judge
 
-## Training
-
-All training scripts assume a single GPU (≥40 GB recommended for 8B + 4-bit +
-LoRA r=32) and write checkpoints to `outputs_<EXPERIMENT>/`.
+CSR's reward and every sampling-based evaluation ask an LLM judge two kinds of
+question: *is this answer correct against the gold answer*, and *are these two answers
+semantically equivalent*. **A judge has to be reachable before any run starts.**
 
 ```bash
-# CSR: default cali-w end = 0.2
-python train_CSR.py --cali-w 0.2
-
-# RLVR baseline
-python train_RLVR.py
-
-# RLCR baseline
-python train_RLCR.py
+export OPENAI_API_KEY=EMPTY     # a local server ignores it, the trainer still requires it
+bash scripts/serve/serve_judge.sh 0 8310 openai/gpt-oss-20b
+#                                 │   │    └ model
+#                                 │   └ port, matches the default judge.base_url
+#                                 └ GPU
 ```
 
-Common training settings (GRPO):
+Nothing else is needed: `configs/judge.yaml` already points at `127.0.0.1:8310`. To use
+a hosted OpenAI model instead, append to any command:
 
-| Setting | Value |
+```bash
+--set judge.base_url=null --set judge.model_id=gpt-4.1-nano \
+--set judge.reasoning_effort=null --set judge.max_tokens=16
+```
+
+Token F1 can stand in for the judge entirely (`--set judge.backend=f1`), which removes
+the dependency at some cost in reward quality.
+
+## 3. Prepare Datasets
+
+Datasets are pulled from the HuggingFace Hub on first use and cached under `data/`; no
+manual download is needed. Checkpoints, evaluation records and logs are written beside
+it, and none of these directories are tracked:
+
+```
+.
+├── data            # HuggingFace datasets and hub cache
+├── ckpt            # ckpt/<METHOD>/<run>/checkpoint-<step>
+├── results         # results/<run>/{config.yaml,results.json,records.jsonl}
+└── logs
+```
+
+| | Available |
 | --- | --- |
-| Train size | 10 000 |
-| Epochs | 1 |
-| Per-device batch / grad-accum | 1 / 4 |
-| `num_generations` | 8 |
-| `adam_beta1` / `adam_beta2` | 0.9 / 0.99 |
-| Optimizer | `paged_adamw_8bit` |
-| Seed | 42 |
+| Methods | `Base` `CSR` `RLVR` `RLCR` `RD` |
+| Models | `qwen` `llama` `mistral` `qwen14b` |
+| Datasets | `hotpot` `hotpot_context` `trivia` `msmarco` `nq_open` |
 
-(See the `GRPOConfig` block in each script for the full hyperparameter list.)
+## 4. Train
 
-## Evaluation
+`scripts/train.sh` takes the method, the model and the GPU index.
 
-Each `evaluation/<METHOD>/eval_<METHOD>_<dataset>.py` script evaluates the corresponding
-method on **1 000 validation examples per dataset**, then computes accuracy,
-ECE, Brier, Spearman ρ, Kendall τ, and AUROC of confidence vs. correctness.
-Each writes:
-
-* `<dataset>_eval_<METHOD>.csv` — one row per evaluated model
-* `<dataset>_<ckpt>.jsonl` — per-example predictions and judge labels
-
-The five method folders use two different confidence proxies, but a unified
-checkpoint interface:
-
-* **Base / RLVR / CSR** (semantic confidence proxy): confidence is estimated
-  from the semantic-cluster distribution of `K=8` rollouts.
-* **RD / RLCR** (verbalized confidence): confidence is parsed from the
-  model's output (RD: `Confidence: <int>`; RLCR: `<confidence>...</confidence>`).
-
-For `RLVR / RD / RLCR / CSR`, the LoRA checkpoint is passed via the
-`--lora-path` CLI argument. **If `--lora-path` is omitted, the script
-evaluates the base model (no LoRA loaded).** `Base/` is hard-wired to
-base-only and accepts no LoRA argument.
+* CSR
 
 ```bash
-# Base — frozen model
-python evaluation/Base/eval_Base_hotpot.py
-
-# RLVR / RD / RLCR / CSR — pass the LoRA checkpoint dir with --lora-path
-python evaluation/RLVR/eval_RLVR_hotpot.py   --lora-path outputs_RLVR/checkpoint-2500
-python evaluation/RD/eval_RD_hotpot.py       --lora-path /path/to/rd/checkpoint
-python evaluation/RLCR/eval_RLCR_hotpot.py   --lora-path /path/to/rlcr/checkpoint
-python evaluation/CSR/eval_CSR_hotpot.py     --lora-path outputs_CSR_0.2/checkpoint-2500
-
-# Same scripts run without --lora-path fall back to base eval.
-python evaluation/RLVR/eval_RLVR_hotpot.py    # → BASE row in CSV
+bash scripts/train.sh CSR qwen 0
 ```
 
-Substitute `_hotpot.py` with `_msmarco.py`, `_nq_open.py`, or `_trivia.py`
-for the other datasets.
+* RLVR
 
-## Datasets
+```bash
+bash scripts/train.sh RLVR llama 1
+```
 
-All datasets are pulled via the HuggingFace `datasets` API; no manual
-download is needed once `HF_CACHE` is set.
+* RLCR
 
-| Script | Dataset |
+```bash
+bash scripts/train.sh RLCR mistral 2
+```
+
+* RD — needs the `csr-rd` environment
+
+```bash
+conda activate csr-rd
+bash scripts/train.sh RD qwen 3
+```
+
+The two settings that matter most for CSR are the calibration weight and the weight on
+binary correctness:
+
+* **`cali_w_start` / `cali_w_end`** — equal values give a constant weight; different
+  values are interpolated by `cali_w_schedule` (`linear` or `sigmoid`, min-max rescaled
+  so it hits both endpoints exactly).
+* **`corr_w`** — 1.0 throughout the paper.
+
+```bash
+bash scripts/train.sh CSR qwen 0 \
+  --set method.train.cali_w_start=0.8 \
+  --set method.train.cali_w_end=1.2 \
+  --set method.train.cali_w_schedule=sigmoid
+```
+
+Higher is not better: `configs/methods/csr.yaml` records where the policy fragments and
+where it collapses onto a single answer.
+
+## 5. Evaluate
+
+* The frozen model
+
+```bash
+bash scripts/eval.sh Base qwen
+```
+
+* A trained checkpoint
+
+```bash
+bash scripts/eval.sh CSR qwen ckpt/CSR/<run>/checkpoint-2500
+```
+
+* A subset of datasets, on a chosen GPU
+
+```bash
+GPU=6 DATASETS="hotpot trivia" bash scripts/eval.sh CSR qwen ckpt/CSR/<run>/checkpoint-2500
+```
+
+* Every finished run as one table
+
+```bash
+python scripts/summarize.py
+```
+
+## 6. Configuration
+
+Config is layered, each file overriding the one before: `default.yaml`, `judge.yaml`,
+the model, the method, then the dataset. The dataset comes last so it can state its own
+requirements — the context-grounded split needs a larger window than the answer-only
+methods default to. Anything on the command line wins over all of them.
+
+**Context-grounded runs** (`hotpot_context`) therefore need no extra flags: the
+distractor paragraphs put the prompt at roughly 1 500 tokens, which does not fit the
+1 024-token window the answer-only methods use, so
+`configs/datasets/hotpot_context.yaml` raises the sequence lengths and lowers vLLM's
+memory share itself.
+
+Three things worth knowing before changing anything:
+
+* **Rollout budget.** `num_generations` controls training; `method.eval.num_rollouts`
+  controls evaluation. The paper trains at K=8 and evaluates at K=16.
+* **Judge calls.** Clustering asks one symmetric equivalence question per unordered
+  pair, so K(K−1)/2 calls per question. At K=16 that is 120 calls, which dominates
+  evaluation time.
+* **Rollouts per optimizer step.** `generation_batch_size` counts completions, not
+  prompts, so prompts per step is `per_device_train_batch_size * grad_accum /
+  num_generations` — 4 at the defaults, hence 2500 steps for one epoch over 10k prompts.
+
+## 7. Appendix Experiments
+
+Each script reads finished runs from `results/` and prints the corresponding table.
+They are post-hoc: no estimator here is ever used during training.
+
+| Script | Reports |
 | --- | --- |
-| Training scripts and `evaluation/*/eval_*_hotpot.py` | `hotpot_qa` (`distractor`) |
-| `evaluation/*/eval_*_msmarco.py` | `microsoft/ms_marco` (`v1.1`) |
-| `evaluation/*/eval_*_nq_open.py` | `google-research-datasets/nq_open` |
-| `evaluation/*/eval_*_trivia.py` | `mandarjoshi/trivia_qa` (`rc.web.nocontext`) |
+| `analysis/selective.py` | Selective prediction (AURAC, AUGRC) and inference cost |
+| `analysis/estimators.py` | Semantic Density and SIMBA-UQ's Bayesian aggregation |
+| `analysis/tradeoff.py` | The accuracy / calibration trade-off, from a LaTeX table |
+| `analysis/aggregation.py` | SIMBA-UQ's arithmetic aggregation and `clf-pairs+gen` classifier |
+| `analysis/simba.py` | The same classifier under SIMBA-UQ's own training protocol |
+| `analysis/majority_vote.py` | Main results recomputed with majority-vote accuracy |
+| `analysis/logprobs.py` | Per-answer log-probabilities for the `+gen` features (vLLM) |
+| `analysis/logprobs_hf.py` | The same, via transformers, for backbones vLLM cannot score |
+| `scripts/f1_judge_eval.py` | The token-F1 judge variant |
+| `scripts/rejudge.py` | Re-scoring a finished run with a different judge |
 
-## Reproducibility notes
+Each file's docstring states what it reproduces and where it departs from the method it
+is named after. These scripts locate runs by name; `analysis/runs.py` holds the naming
+scheme they expect, so point that module at your own runs first.
 
-* Seed is fixed to `42` everywhere (`random`, `numpy`, `torch`, dataset
-  shuffling, GRPO).
-* The judge is called with `temperature=0`, `max_tokens=16`, and
-  `Correct: YES/NO` parsing; an LRU cache (≤200 K entries) deduplicates calls
-  across rollouts and checkpoints.
-* `train_RLCR.py` is an unsloth/GRPO port of the published RLCR recipe;
-  reward functions, prompt (`tabc_long`), and reward weights match upstream.
-  Single-GPU adaptations: per-device batch 1 with `gradient_accumulation_steps=4`,
-  `paged_adamw_8bit`, full attention + MLP LoRA targets,
-  `max_seq_length=4096`, `max_completion_length=1024`.
+## 8. Tests
 
-## Upstream code
+Each test file runs on its own, with no GPU and no API key — the judge is stubbed, so
+what is exercised is the estimator rather than the model:
 
-* RLCR baseline (`train_RLCR.py`) — ported from
-  [github.com/damanimehul/RLCR](https://github.com/damanimehul/RLCR).
-* RD baseline — trained with the upstream
-  [github.com/pasta99/RewardingDoubt](https://github.com/pasta99/RewardingDoubt)
-  repository unmodified
-  ([arXiv:2503.02623](https://arxiv.org/abs/2503.02623)). Evaluation of RD
-  checkpoints uses the verbalized-confidence parser in
-  [`evaluation/RD/`](evaluation/RD/).
+```bash
+python tests/test_calibration_reward.py   # pair enumeration, normalised BCE, unreadable verdicts
+python tests/test_f1_judge.py             # the token-F1 judge backend
+python tests/test_question_batch.py       # batching
+```
+
+---
+
+# References
+
+If you find this code helpful in your research, please consider citing
+
+```bibtex
+@inproceedings{csr2026calibrating,
+title={Calibrating LLMs with Semantic-level Reward},
+author={Yu, Fengfei and Niu, Ruijia and Wu, Dongxia and Ma, Yian and Yu, Rose},
+booktitle={NeurIPS},
+year={2026}
+}
+```
+
+# Implementation Credits
+
+Some of our implementations rely on other repos. We want to thank the authors
+([RLCR](https://github.com/damanimehul/RLCR),
+[Rewarding Doubt](https://github.com/pasta99/RewardingDoubt),
+[unsloth](https://github.com/unslothai/unsloth),
+[TRL](https://github.com/huggingface/trl) and
+[vLLM](https://github.com/vllm-project/vllm)) for making their code publicly
+available.😄
+
+`csr/rlcr.py` and `configs/methods/rlcr.yaml` follow RLCR, which is MIT licensed
+(Copyright (c) 2025 damanimehul). `rd_util/` is vendored from Rewarding Doubt; see
+`rd_util/__init__.py` for the local changes.

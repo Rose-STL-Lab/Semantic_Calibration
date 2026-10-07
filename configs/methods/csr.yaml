@@ -1,0 +1,64 @@
+# CSR = RLVR's correctness reward + a semantic calibration reward whose weight
+# follows a linear schedule from cali_w_start to cali_w_end (constant when equal).
+# Answer-only: no chain-of-thought, no verbalized confidence token.
+method:
+  name: CSR
+  kind: semantic
+  trainable: true
+  system_prompt: |-
+    Provide a concise and direct answer to the question. Avoid unnecessary explanations or additional text.
+
+  train:
+    algorithm: grpo
+    reward: calibration_correctness
+    corr_w: 1.0                    # weight on the binary correctness reward
+    cali_w_start: 1.0              # calibration weight, held constant
+    cali_w_end: 1.0
+    # Both rewards are on [0, 1], so the two weights are directly comparable.
+    # Above ~1.4 the policy fragments; above ~2.7 it collapses onto one answer.
+    # TRL's scale_rewards='group' is relied on and deliberately left unset.
+    max_seq_length: 1024
+    max_prompt_length: 256
+    learning_rate: 5.0e-6
+    beta: 0.01
+    loss_type: grpo
+    adam_beta1: 0.9
+    adam_beta2: 0.99
+    weight_decay: 0.1
+    warmup_ratio: 0.1
+    lr_scheduler_type: cosine
+    optim: paged_adamw_8bit
+    # TRL >= 0.24 counts completions here, not prompts, and the generation
+    # batch must hold whole prompt groups: 8 * 4 = 32 completions, i.e. 4
+    # prompts per optimizer step, so one epoch over 10k prompts is 2500 steps.
+    per_device_train_batch_size: 8
+    gradient_accumulation_steps: 4
+    num_generations: 8
+    temperature: 0.7
+    top_p: 0.95
+    num_train_epochs: 1
+    max_steps: -1
+    save_steps: 250
+    max_grad_norm: 0.1
+    logging_steps: 1
+    # Mid-training validation on the eval split. Each pass costs
+    # eval_size x (eval_num_rollouts + K(K-1)/2) judge calls, so it is not
+    # cheap; set eval_every_steps to 0 to turn it off. Checkpoints are saved
+    # every save_steps either way and can be scored afterwards with
+    # evaluation/eval_semantic.py.
+    eval_every_steps: 1000
+    eval_num_rollouts: 8
+    eval_max_new_tokens: 256
+    eval_temperature: 0.7
+    eval_top_p: 0.95
+    eval_size: 1000
+
+  eval:
+    num_rollouts: 16
+    temperature: 0.7
+    top_p: 0.95
+    max_new_tokens: 256
+    max_seq_length: 1024
+    ece_bins: 10
+    # Clustering asks one symmetric equivalence question per unordered pair
+    # (K(K-1)/2 = 28 calls at K=8) -- the same protocol CSR trains against.

@@ -1,0 +1,31 @@
+model:
+  name: qwen
+  display_name: Qwen2.5-7B-Instruct
+
+  # checkpoints live in ckpt/<METHOD>/<ckpt_name>/
+  ckpt_name: qwen7b
+  hf_id: unsloth/Qwen2.5-7B-Instruct   # fp16 re-upload of Qwen/Qwen2.5-7B-Instruct
+
+  # stripped from the tail before an answer is parsed, scored or judged
+  chat_end_markers:
+    - "<|im_end|>"
+    - "<|endoftext|>"
+
+  # Qwen often separates the two RD fields with something other than a comma
+  verbalized_separators: [",", ";", ":", ".", "\n"]
+
+  # without this, unsloth silently loads its own *-unsloth-bnb-4bit build instead
+  use_exact_model_name: true
+
+  load_in_4bit: true
+  # vLLM's share of the card; 0.7 OOMs an 8-completion backward pass, 0.5 does not.
+  # Do NOT shrink the backward micro-batch below num_generations instead: half a
+  # prompt group trains with grad_norm=NaN and loss=0.
+  gpu_memory_utilization: 0.5
+
+  lora:
+    rank: 32
+    random_state: 3407     # LoRA init seed (unsloth default)
+    alpha: 32
+    dropout: 0.0
+    target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]

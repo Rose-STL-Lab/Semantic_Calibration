@@ -1,0 +1,14 @@
+dataset:
+  name: msmarco
+  display_name: MSMARCO
+  role: out-of-distribution
+  hf:
+    path: microsoft/ms_marco
+    config: v1.1
+  train_split: train
+  eval_split: validation
+  train_size: 10000
+  eval_size: 1000
+  # Out of distribution: correctness is scored against the gold answers.
+  # judge | gold  (see configs/judge.yaml)
+  correctness_prompt: gold

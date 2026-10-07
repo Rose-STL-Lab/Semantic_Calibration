@@ -1,0 +1,29 @@
+model:
+  name: qwen14b
+  display_name: Qwen3-14B
+
+  # checkpoints live in ckpt/<METHOD>/<ckpt_name>/
+  ckpt_name: qwen14b
+
+  # the reused RLVR/RD/RLCR adapters were trained on this pre-quantized 4-bit build
+  # and only load on these exact weights -- hence use_exact_model_name: false
+  hf_id: unsloth/qwen3-14b-unsloth-bnb-4bit
+  use_exact_model_name: false
+
+  chat_end_markers:
+    - "<|im_end|>"
+    - "<|endoftext|>"
+
+  verbalized_separators: [",", ";", ":", ".", "\n"]
+
+  load_in_4bit: true
+  # vLLM's share of the card -- below the 7B configs because 14B weights leave less
+  # for the training step; raise it for inference-only runs
+  gpu_memory_utilization: 0.4
+
+  lora:
+    rank: 32
+    random_state: 3407
+    alpha: 32
+    dropout: 0.0
+    target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]

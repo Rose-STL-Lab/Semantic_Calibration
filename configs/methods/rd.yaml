@@ -1,0 +1,49 @@
+# Rewarding Doubt (Bani-Harouni et al., 2025): PPO with a clipped log-loss on
+# the verbalized confidence. Training runs in the upstream RD conda environment
+# (environment-rd.yml); evaluation runs in the normal `csr` environment.
+method:
+  name: RD
+  kind: verbalized
+  trainable: true
+  system_prompt: |-
+    You will get questions. Answer with the correct answer. Additionally provide a confidence between 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, of how sure you are the answer is correct. A value close to 0 means you think there is a high probability that the answer is wrong. The closer the value is to 10, the higher you think is the probability that the answer is correct. The output should have the format 'Answer: <answer>, Confidence: <confidence>' and nothing else.
+
+  # How to read a confidence out of the generation.
+  confidence:
+    style: rd                 # "Answer: <a>, Confidence: <int 0-10>"
+    scale: 10.0               # divide the parsed integer by this to get [0,1]
+
+  train:
+    algorithm: ppo
+    learning_rate: 1.41e-5
+    epochs: 1
+    batch_size: 4
+    max_seq_length: 1048
+    max_train_samples: 10000
+    max_validation_samples: 1000
+    max_eval_train_samples: 1000
+    save_every_steps: 250      # checkpoint cadence -- independent of eval below
+    # Mid-training validation on the eval split. Set to 0 to turn it off;
+    # checkpoints are saved every save_steps either way and can be scored
+    # afterwards with evaluation/eval_verbalized.py.
+    eval_every_steps: 1000
+    reward_log_interval: 10
+    shuffle_seed: 42
+
+    # Upstream's value. A rollout cut off before "Confidence:" is unparsable
+    # and takes the wrong-format penalty, so this has room to spare.
+    ppo_max_new_tokens: 500
+
+    # sampling for the periodic train/validation generations, not the PPO rollouts
+    rollout_max_new_tokens: 256
+    rollout_temperature: 0.6
+    rollout_top_p: 0.9
+    use_lora: true
+    is_unsloth: true
+
+  eval:
+    temperature: 0.0          # greedy, single sample
+    top_p: 1.0
+    max_new_tokens: 256
+    max_seq_length: 1024
+    ece_bins: 10

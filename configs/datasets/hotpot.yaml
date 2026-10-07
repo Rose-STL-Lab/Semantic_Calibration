@@ -1,0 +1,14 @@
+dataset:
+  name: hotpot
+  display_name: HotpotQA
+  role: in-distribution          # trained on; also the ID evaluation set
+  hf:
+    path: hotpot_qa
+    config: distractor
+  train_split: train
+  eval_split: validation
+  train_size: 10000
+  eval_size: 1000
+  # One prompt serves both roles: correctness and semantic equivalence.
+  # judge | gold  (see configs/judge.yaml)
+  correctness_prompt: judge

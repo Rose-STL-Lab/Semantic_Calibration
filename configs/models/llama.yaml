@@ -1,0 +1,31 @@
+model:
+  name: llama
+  display_name: Llama-3.1-8B-Instruct
+
+  # checkpoints live in ckpt/<METHOD>/<ckpt_name>/
+  ckpt_name: llama8b
+  hf_id: unsloth/meta-Llama-3.1-8B-Instruct   # fp16 re-upload of the gated meta-llama repo, identical weights
+
+  # stripped from the tail before an answer is parsed, scored or judged
+  chat_end_markers:
+    - "<|eot_id|>"
+    - "<|end_of_text|>"
+
+  # separators accepted between "Answer:" and "Confidence:" in the RD format
+  verbalized_separators: [","]
+
+  # without this, unsloth silently loads its own *-unsloth-bnb-4bit build instead
+  use_exact_model_name: true
+
+  load_in_4bit: true
+  # vLLM's share of the card; 0.7 OOMs an 8-completion backward pass, 0.5 does not.
+  # Do NOT shrink the backward micro-batch below num_generations instead: half a
+  # prompt group trains with grad_norm=NaN and loss=0.
+  gpu_memory_utilization: 0.5
+
+  lora:
+    rank: 32
+    random_state: 3407     # LoRA init seed (unsloth default)
+    alpha: 32
+    dropout: 0.0
+    target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]

@@ -1,0 +1,190 @@
+"""One run directory ``results/<exp_name>/`` holding config.yaml, results.json
+(the artefact to read afterwards) and results.csv (the same data, flat).
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+import os
+import time
+from typing import Iterable
+
+from .config import dump_config
+
+# per-question fields repeated on every rollout row, so a CSV row is self-contained
+_QUESTION_FIRST = ("idx", "question", "gold_answers")
+_ROLLOUT_ORDER = ("rollout", "full_answer", "extracted_answer", "semantic_id",
+                  "correct", "completion_tokens")
+
+
+class RunDir:
+    def __init__(self, results_root: str, exp_name: str):
+        self.path = os.path.join(results_root, exp_name)
+        self.exp_name = exp_name
+        os.makedirs(self.path, exist_ok=True)
+        self.config_path = os.path.join(self.path, "config.yaml")
+        self.results_path = os.path.join(self.path, "results.json")
+        self.csv_path = os.path.join(self.path, "results.csv")
+        # kept for callers that print where they resume from
+        self.records_path = self.results_path
+        self._meta: dict = {}
+        self._records: list[dict] = []
+
+    def save_config(self, cfg, checkpoint: str | None = None) -> None:
+        """Write config.yaml and remember method/model/dataset/checkpoint for results.json."""
+        dump_config(cfg, self.config_path)
+        self._meta = _describe(self.exp_name, cfg, checkpoint)
+
+    # -- incremental records --------------------------------------------
+    def load_records(self, limit: int | None = None) -> list[dict]:
+        """Read back whatever a previous run of this experiment finished, to resume from."""
+        if not os.path.exists(self.results_path) or os.path.getsize(self.results_path) == 0:
+            return []
+        try:
+            with open(self.results_path, encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except json.JSONDecodeError:
+            return []  # interrupted mid-write; start over
+        rows = list(payload.get("records", []))
+        if limit is not None:
+            rows = rows[:limit]
+        # a copy: eval_semantic.py appends to what it gets back and also calls
+        # append_records(), so aliasing would count every resumed question twice
+        self._records = list(rows)
+        return rows
+
+    def append_records(self, rows: Iterable[dict]) -> None:
+        """Append-only: add finished questions and rewrite results.json as a partial."""
+        rows = list(rows)
+        if not rows:
+            return
+        self._records.extend(rows)
+        self._write_json(status="partial", summary=None)
+
+    def rewrite_records(self, rows: Iterable[dict]) -> None:
+        """Replace the stored records: the judge phase of a split generate/judge run
+        edits records already on disk, which append_records() cannot do."""
+        self._records = list(rows)
+        self._write_json(status="partial", summary=None)
+
+    def reset_records(self) -> None:
+        self._records = []
+        for path in (self.results_path, self.csv_path):
+            if os.path.exists(path):
+                os.remove(path)
+
+    # -- final artefact ---------------------------------------------------
+    def save_results(self, cfg, summary: dict, records: list[dict],
+                     checkpoint: str | None = None) -> str:
+        self._records = list(records)
+        self._meta = _describe(self.exp_name, cfg, checkpoint)
+        self._write_json(status="final", summary=summary)
+        self._write_csv()
+        return self.results_path
+
+    # -- writers ----------------------------------------------------------
+    def _write_json(self, status: str, summary: dict | None) -> None:
+        payload = dict(self._meta)
+        payload.update({
+            "status": status,
+            "n_records": len(self._records),
+            "updated": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "summary": summary,
+            "records": self._records,
+        })
+        tmp = self.results_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2, default=_jsonable)
+        os.replace(tmp, self.results_path)   # never leave a half-written file
+
+    def _write_csv(self) -> None:
+        write_rows_csv(self.csv_path, flatten_records(self._records))
+
+
+def write_rows_csv(path: str, rows) -> None:
+    """Flat rows with a stable column order; shared with the training-time validation
+    callback so both produce the same columns."""
+    rows = list(rows)
+    if not rows:
+        return
+    keys: list[str] = []
+    for row in rows:
+        for k in row:
+            if k not in keys:
+                keys.append(k)
+    ordered = [k for k in _QUESTION_FIRST if k in keys]
+    ordered += [k for k in _ROLLOUT_ORDER if k in keys and k not in ordered]
+    ordered += [k for k in keys if k not in ordered]
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=ordered, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: _csvable(row.get(k)) for k in ordered})
+    os.replace(tmp, path)
+
+
+def _describe(exp_name: str, cfg, checkpoint: str | None) -> dict:
+    return {
+        "experiment": exp_name,
+        "method": cfg["method"]["name"],
+        "model": cfg["model"]["name"],
+        "model_hf_id": cfg["model"]["hf_id"],
+        "dataset": cfg["dataset"]["name"],
+        "checkpoint": checkpoint or "base",
+    }
+
+
+def flatten_records(records: Iterable[dict]) -> Iterable[dict]:
+    """One flat row per rollout, or per question when a record has no rollouts;
+    question-level fields (confidence, accuracy, ...) repeat on each rollout row."""
+    for rec in records:
+        rollouts = rec.get("rollouts")
+        base = {k: v for k, v in rec.items() if k != "rollouts"}
+        if not rollouts:
+            yield base
+            continue
+        for j, ro in enumerate(rollouts):
+            row = dict(base)
+            row["rollout"] = j
+            row.update(ro)
+            yield row
+
+
+def _csvable(value):
+    if isinstance(value, (list, tuple, dict)):
+        return json.dumps(value, ensure_ascii=False, default=_jsonable)
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except (ValueError, AttributeError):
+            pass
+    return value
+
+
+def _jsonable(value):
+    """numpy scalars and anything else json cannot serialize on its own."""
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except (ValueError, AttributeError):
+            pass
+    return str(value)
+
+
+def print_summary(summary: dict, title: str = "") -> None:
+    def fmt(key, digits=4):
+        value = summary.get(key)
+        if value is None:
+            return "NA"
+        if isinstance(value, float):
+            return f"{value:.{digits}f}"
+        return str(value)
+
+    header = f"[{title}] " if title else ""
+    print(
+        f"{header}n={summary.get('n')}  acc={fmt('accuracy')}  "
+        f"conf={fmt('avg_confidence')}  ECE={fmt('ece')}  Brier={fmt('brier')}  "
+        f"AUROC={fmt('auroc')}  Spearman={fmt('spearman')}  Kendall={fmt('kendall')}"
+    )

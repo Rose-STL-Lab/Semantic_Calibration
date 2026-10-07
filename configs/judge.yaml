@@ -1,0 +1,78 @@
+# LLM judge: equivalence between two rollouts, and correctness against the gold answer.
+# Credentials come from the env only: OPENAI_API_KEY (+ OPENAI_API_VERSION and OPENAI_AZURE_ENDPOINT for Azure).
+
+judge:
+  # llm = the prompts below; f1 = token-level F1 only (csr/f1_judge.py), no model
+  # and no API key, which leaves the rest of this file unused. --set judge.backend=f1
+  backend: llm
+  f1_threshold: 0.5          # reported taus: 0.50 Llama/Mistral, 0.80 Qwen
+
+  model_id: gpt-oss-20b
+  temperature: 0.0
+  max_tokens: 1024
+  max_retries: 2
+  sleep_sec: 1.5
+  # the SDK default (600 s) lets one stalled socket hold a whole batch
+  request_timeout_sec: 20
+  client_max_retries: 1
+  # local gpt-oss-20b from scripts/serve/serve_judge.sh -- the judge of the reported
+  # results; max_tokens 1024 because it reasons before answering. Hosted instead:
+  #   --set judge.base_url=null judge.model_id=gpt-4.1-nano judge.reasoning_effort=null judge.max_tokens=16
+  base_url: http://127.0.0.1:8310/v1
+  api_key: null
+  reasoning_effort: low
+  max_workers: 32
+  batch_size: 128
+  cache_max_size: 200000
+
+  system_prompt: "You are a helpful assistant that helps people find information."
+
+  # One prompt for both roles: rollout-vs-rollout equivalence, and HotpotQA
+  # correctness.
+  judge_prompt: |-
+    Given a question and two potential answers, you need to analyze whether the two answers convey the same meaning. Respond with "yes" or "no".
+    Your response should be completely based on the similarity between the two answers.
+    DO NOT use your own knowledge base when do the comparison.
+
+    Question:
+    {q}
+    Response 1:
+    {a}
+    Response 2:
+    {b}
+
+    Your response should use the following format:
+    Correct: <yes or no>
+
+  # OOD correctness: TriviaQA always multi-gold, NQ-Open/MSMARCO pick by gold count,
+  # HotpotQA uses judge_prompt. Directional: {a} is the candidate, {b} the reference.
+  single_gold_prompt: |-
+    Given a question, one generated answer, and the gold correct answer, determine whether the generated answer matches the gold answer in meaning. Respond with "yes" or "no".
+    Your response should be completely based on the similarity between the generated answer and the gold correct answer.
+    DO NOT use your own knowledge base when do the comparison.
+
+    Question:
+    {q}
+    Generated Answer:
+    {a}
+    Gold Correct Answer:
+    {b}
+
+    Your response should use the following format:
+    Correct: <yes or no>
+
+
+  multi_gold_prompt: |-
+    Given a question, one generated answer, and a list of candidate correct answers, you need to analyze whether the generated answer matches any candidate correct answer. Respond with "yes" or "no".
+    Your response should be completely based on the similarity between the generated answer and the candidate correct answers.
+    DO NOT use your own knowledge base when do the comparison.
+
+    Question:
+    {q}
+    Generated Answer:
+    {a}
+    Candidate Correct Answers:
+    {b}
+
+    Your response should use the following format:
+    Correct: <yes or no>

@@ -1,0 +1,14 @@
+# Loaded first, then judge.yaml, models/<model>, methods/<method>,
+# datasets/<dataset>, then any --set overrides.
+
+# one seed for python/numpy/torch RNGs, shuffling, LoRA init, GRPO and rollout sampling
+seed: 42
+
+paths:
+  data: data                 # HuggingFace datasets + any local corpora
+  hf_cache: data/hf_cache    # HF_HOME / hub / datasets cache
+  ckpt: ckpt                 # training checkpoints
+  results: results           # results/<exp_name>/{config.yaml,results.json,records.jsonl}
+
+# vLLM chatter is muted by default; set to false to see it.
+quiet_vllm: true

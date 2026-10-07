@@ -1,0 +1,26 @@
+model:
+  name: mistral
+  display_name: Mistral-7B-Instruct-v0.3
+
+  # checkpoints live in ckpt/<METHOD>/<ckpt_name>/
+  ckpt_name: mistral7b
+  hf_id: unsloth/mistral-7b-instruct-v0.3   # fp16 re-upload of mistralai/Mistral-7B-Instruct-v0.3
+
+  chat_end_markers:
+    - "</s>"
+    - "<|im_end|>"
+
+  verbalized_separators: [",", ";", ":", ".", "\n"]
+
+  # without this, unsloth silently loads its own *-unsloth-bnb-4bit build instead
+  use_exact_model_name: true
+
+  load_in_4bit: true
+  gpu_memory_utilization: 0.7   # vLLM's share of the card; the training step lives in the rest
+
+  lora:
+    rank: 32
+    random_state: 3407     # LoRA init seed (unsloth default)
+    alpha: 32
+    dropout: 0.0
+    target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]

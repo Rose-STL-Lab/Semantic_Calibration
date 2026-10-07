@@ -1,0 +1,15 @@
+method:
+  name: Base
+  kind: semantic            # semantic | verbalized
+  trainable: false
+  system_prompt: |-
+    Provide a concise and direct answer to the question. Avoid unnecessary explanations or additional text.
+  eval:
+    num_rollouts: 16
+    temperature: 0.7
+    top_p: 0.95
+    max_new_tokens: 256
+    max_seq_length: 1024
+    ece_bins: 10
+    # Clustering asks one symmetric equivalence question per unordered pair
+    # (K(K-1)/2 = 28 calls at K=8) -- the same protocol CSR trains against.

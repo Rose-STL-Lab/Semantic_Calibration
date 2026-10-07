@@ -1,0 +1,69 @@
+__pycache__/
+*.py[cod]
+*.log
+
+# ---------------------------------------------------------------- run outputs
+# Datasets are downloaded on first use; checkpoints and evaluation records are
+# large and machine-specific.
+data/*
+!data/.gitkeep
+!data/README.md
+ckpt/*
+!ckpt/.gitkeep
+results/*
+!results/.gitkeep
+logs/
+runs/
+
+# Caches and scratch state that the trainer writes into the working directory.
+unsloth_compiled_cache/
+grpo_trainer_lora_model_*/
+
+# ------------------------------------------------------- not part of the release
+# Figure code: turns finished runs into PDFs.
+analysis/ablation/
+analysis/roc/
+analysis/qualitative_examples.py
+
+# Superseded variants.
+_archive/
+analysis/semdens_formal.py
+
+# One-off launchers and probes. The entry points are scripts/train.sh,
+# scripts/eval.sh and scripts/serve/serve_judge.sh.
+scripts/_runlog/
+scripts/chain_rd_runs.sh
+scripts/keeper_csr_qwen.sh
+scripts/launch_csr.sh
+scripts/run_csr_*.sh
+scripts/t4_*.sh
+scripts/hold_gpu.py
+scripts/import_rluq_jsonl.py
+scripts/rejudge_rd_jsonl.py
+scripts/audit_calibration_reward.py
+scripts/diag_grad.py
+scripts/watch_eval.py
+scripts/report_table9.py
+scripts/seed_eval_from_validation.py
+scripts/serve/serve_oss20b_gpu*.sh
+
+# Working notes, not documentation.
+EXPERIMENT_LOG.md
+HANDOFF.md
+HANDOFF_TABLE10.md
+RUNBOOK_LOGPROBS.md
+RENAME_MAP.tsv
+reward_patch_notes.md
+
+# ---------------------------------------------- credentials and editor leftovers
+.env
+.env.*
+*.key
+*.pem
+*.token
+.DS_Store
+*.swp
+*.swo
+nohup.out
+.idea/
+.vscode/
