@@ -112,8 +112,6 @@ def table8(latex: bool) -> None:
     """Relative change vs Base, averaged over model families.
 
     (M-B)/B for accuracy and AUROC but (B-M)/B for ECE, so positive is always better.
-    analysis/tradeoff.py derives the same table from the .tex Table 1 cells instead,
-    and the two can disagree.
     """
     def metrics(exp):
         s = load(exp)["summary"]

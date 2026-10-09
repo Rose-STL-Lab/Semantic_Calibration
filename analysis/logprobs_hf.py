@@ -1,10 +1,8 @@
 """Answer log-probabilities without vLLM, for the backbones vLLM cannot score.
 
-Same job, arithmetic and output as ``logprobs.py``, by a plain transformers forward
-pass; it exists because vLLM 0.11.2's ``prompt_logprobs`` path crashes for
-Llama-3.1-8B and Mistral-7B under LoRA (Qwen2.5-7B does not trigger it).
-Writes ``logprobs.json`` by default, but aggregation.py and estimators.py read
-``logprobs_hf.json`` -- pass --out-name logprobs_hf.json for the published table.
+A plain transformers forward pass, not vLLM: vLLM 0.11.2's ``prompt_logprobs``
+path crashes for Llama-3.1-8B and Mistral-7B under LoRA. Writes
+``logprobs_hf.json``, which aggregation.py and estimators.py read.
 
     # verify against a run that vLLM already scored
     python analysis/logprobs_hf.py --model qwen7b --method Base \
@@ -119,7 +117,7 @@ def main() -> None:
                         help="answers scored per forward pass")
     parser.add_argument("--out-name", default=None,
                         help="file name to write next to the run; defaults to "
-                             "logprobs.json (logprobs_smoke.json with --limit)")
+                             "logprobs_hf.json (logprobs_smoke.json with --limit)")
     # vLLM logs fp4 without double quant, so its numbers are not interchangeable
     parser.add_argument("--quant-type", default="nf4", choices=("nf4", "fp4"),
                         help="nf4 with double quant is what the reference "
@@ -206,7 +204,7 @@ def main() -> None:
                   f"within 0.05: {within:.1%}")
             continue
 
-        default_name = "logprobs_smoke.json" if args.limit else "logprobs.json"
+        default_name = "logprobs_smoke.json" if args.limit else "logprobs_hf.json"
         path = run_dir / (args.out_name or default_name)
         path.write_text(json.dumps(out))
         print(f"[saved] {path}  ({len(out)} questions)", flush=True)

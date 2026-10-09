@@ -63,21 +63,35 @@ CSR's reward and every sampling-based evaluation ask an LLM judge two kinds of
 question: *is this answer correct against the gold answer*, and *are these two answers
 semantically equivalent*. **A judge has to be reachable before any run starts.**
 
+The default is GPT-4.1-nano on the hosted OpenAI endpoint, so all it needs is a key:
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+Nothing else: `configs/judge.yaml` already holds the model, the temperature and the
+retry policy.
+
+To run a local judge instead — gpt-oss-20b, or any other model vLLM can serve — start a
+server and point the config at it:
+
 ```bash
 export OPENAI_API_KEY=EMPTY     # a local server ignores it, the trainer still requires it
 bash scripts/serve/serve_judge.sh 0 8310 openai/gpt-oss-20b
 #                                 │   │    └ model
-#                                 │   └ port, matches the default judge.base_url
+#                                 │   └ port
 #                                 └ GPU
 ```
 
-Nothing else is needed: `configs/judge.yaml` already points at `127.0.0.1:8310`. To use
-a hosted OpenAI model instead, append to any command:
+then append to any command:
 
 ```bash
---set judge.base_url=null --set judge.model_id=gpt-4.1-nano \
---set judge.reasoning_effort=null --set judge.max_tokens=16
+--set judge.base_url=http://127.0.0.1:8310/v1 --set judge.model_id=gpt-oss-20b \
+--set judge.reasoning_effort=low --set judge.max_tokens=1024
 ```
+
+`reasoning_effort` and the larger `max_tokens` are what gpt-oss-20b needs to reason
+before answering; a non-reasoning model rejects the first and does not need the second.
 
 Token F1 can stand in for the judge entirely (`--set judge.backend=f1`), which removes
 the dependency at some cost in reward quality.
@@ -208,12 +222,9 @@ They are post-hoc: no estimator here is ever used during training.
 | --- | --- |
 | `analysis/selective.py` | Selective prediction (AURAC, AUGRC) and inference cost |
 | `analysis/estimators.py` | Semantic Density and SIMBA-UQ's Bayesian aggregation |
-| `analysis/tradeoff.py` | The accuracy / calibration trade-off, from a LaTeX table |
 | `analysis/aggregation.py` | SIMBA-UQ's arithmetic aggregation and `clf-pairs+gen` classifier |
 | `analysis/simba.py` | The same classifier under SIMBA-UQ's own training protocol |
-| `analysis/majority_vote.py` | Main results recomputed with majority-vote accuracy |
-| `analysis/logprobs.py` | Per-answer log-probabilities for the `+gen` features (vLLM) |
-| `analysis/logprobs_hf.py` | The same, via transformers, for backbones vLLM cannot score |
+| `analysis/logprobs_hf.py` | Per-answer log-probabilities for the `+gen` features |
 | `scripts/f1_judge_eval.py` | The token-F1 judge variant |
 | `scripts/rejudge.py` | Re-scoring a finished run with a different judge |
 
@@ -256,7 +267,3 @@ Some of our implementations rely on other repos. We want to thank the authors
 [TRL](https://github.com/huggingface/trl) and
 [vLLM](https://github.com/vllm-project/vllm)) for making their code publicly
 available.😄
-
-`csr/rlcr.py` and `configs/methods/rlcr.yaml` follow RLCR, which is MIT licensed
-(Copyright (c) 2025 damanimehul). `rd_util/` is vendored from Rewarding Doubt; see
-`rd_util/__init__.py` for the local changes.

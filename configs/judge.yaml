@@ -7,20 +7,21 @@ judge:
   backend: llm
   f1_threshold: 0.5          # reported taus: 0.50 Llama/Mistral, 0.80 Qwen
 
-  model_id: gpt-oss-20b
+  model_id: gpt-4.1-nano
   temperature: 0.0
-  max_tokens: 1024
+  max_tokens: 16             # the prompts answer with one word
   max_retries: 2
   sleep_sec: 1.5
   # the SDK default (600 s) lets one stalled socket hold a whole batch
   request_timeout_sec: 20
   client_max_retries: 1
-  # local gpt-oss-20b from scripts/serve/serve_judge.sh -- the judge of the reported
-  # results; max_tokens 1024 because it reasons before answering. Hosted instead:
-  #   --set judge.base_url=null judge.model_id=gpt-4.1-nano judge.reasoning_effort=null judge.max_tokens=16
-  base_url: http://127.0.0.1:8310/v1
+  # null = the hosted OpenAI endpoint. For a local server instead, e.g.
+  # scripts/serve/serve_judge.sh 0 8310 openai/gpt-oss-20b:
+  #   --set judge.base_url=http://127.0.0.1:8310/v1 --set judge.model_id=gpt-oss-20b
+  #   --set judge.reasoning_effort=low --set judge.max_tokens=1024
+  base_url: null
   api_key: null
-  reasoning_effort: low
+  reasoning_effort: null     # only reasoning models take it; gpt-oss-20b wants "low"
   max_workers: 32
   batch_size: 128
   cache_max_size: 200000
