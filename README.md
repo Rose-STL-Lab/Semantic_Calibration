@@ -1,12 +1,13 @@
 <h1 align="center">Calibrating LLMs with Semantic-level Reward</h1>
 <p align="center">
+    <a href="https://arxiv.org/abs/2605.15588"> <img src="https://img.shields.io/badge/arXiv-2605.15588-b31b1b" alt="arXiv"> </a>
     <img src="https://img.shields.io/badge/NeurIPS'26-blue" alt="NeurIPS 2026">
     <img src="https://img.shields.io/badge/python-3.11-blue" alt="python">
     <img src="https://img.shields.io/badge/PyTorch-2.9-ee4c2c" alt="pytorch">
 </p>
 
-Hi, this is the code for our NeurIPS 2026 paper: *Calibrating LLMs with Semantic-level
-Reward*.
+Hi, this is the code for our NeurIPS 2026 paper:
+*[Calibrating LLMs with Semantic-level Reward](https://arxiv.org/abs/2605.15588)*.
 
 ![Overview of CSR](assets/CSR_overview.png)
 
