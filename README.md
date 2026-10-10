@@ -34,7 +34,6 @@ estimators reported in the appendix.
 | `analysis/` | Post-hoc estimators and aggregation rules reported in the appendix |
 | `scripts/` | `train.sh`, `eval.sh`, `serve/serve_judge.sh`, and result collection |
 | `rd_util/` | Utilities for the Rewarding-Doubt baseline, kept close to upstream |
-| `tests/` | Unit tests for the calibration reward, the F1 judge and batching |
 
 # Getting started
 
@@ -232,17 +231,6 @@ They are post-hoc: no estimator here is ever used during training.
 Each file's docstring states what it reproduces and where it departs from the method it
 is named after. These scripts locate runs by name; `analysis/runs.py` holds the naming
 scheme they expect, so point that module at your own runs first.
-
-## 8. Tests
-
-Each test file runs on its own, with no GPU and no API key — the judge is stubbed, so
-what is exercised is the estimator rather than the model:
-
-```bash
-python tests/test_calibration_reward.py   # pair enumeration, normalised BCE, unreadable verdicts
-python tests/test_f1_judge.py             # the token-F1 judge backend
-python tests/test_question_batch.py       # batching
-```
 
 ---
 

@@ -29,6 +29,8 @@ analysis/qualitative_examples.py
 _archive/
 analysis/semdens_formal.py
 
+tests/
+
 # One-off launchers and probes. The entry points are scripts/train.sh,
 # scripts/eval.sh and scripts/serve/serve_judge.sh.
 scripts/_runlog/
