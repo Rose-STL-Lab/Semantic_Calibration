@@ -114,35 +114,19 @@ it, and none of these directories are tracked:
 | --- | --- |
 | Methods | `Base` `CSR` `RLVR` `RLCR` `RD` |
 | Models | `qwen` `llama` `mistral` `qwen14b` |
-| Datasets | `hotpot` `hotpot_context` `trivia` `msmarco` `nq_open` |
+| Datasets | `hotpot` `trivia` `msmarco` `nq_open` |
 
 ## 4. Train
 
-`scripts/train.sh` takes the method, the model and the GPU index.
-
-* CSR
-
 ```bash
-bash scripts/train.sh CSR qwen 0
+bash scripts/train.sh <METHOD> <model> <GPU> [--set key=value ...]
 ```
 
-* RLVR
-
 ```bash
-bash scripts/train.sh RLVR llama 1
-```
+bash scripts/train.sh CSR qwen 0            # CSR, Qwen2.5-7B, GPU 0
 
-* RLCR
-
-```bash
-bash scripts/train.sh RLCR mistral 2
-```
-
-* RD — needs the `csr-rd` environment
-
-```bash
-conda activate csr-rd
-bash scripts/train.sh RD qwen 3
+conda activate csr-rd                       # RD pins the older stack
+bash scripts/train.sh RD llama 1
 ```
 
 The two settings that matter most for CSR are the calibration weight and the weight on
@@ -165,42 +149,49 @@ where it collapses onto a single answer.
 
 ## 5. Evaluate
 
-* The frozen model
-
 ```bash
-bash scripts/eval.sh Base qwen
+bash scripts/eval.sh <METHOD> <model> [checkpoint] [--set key=value ...]
 ```
 
-* A trained checkpoint
-
 ```bash
-bash scripts/eval.sh CSR qwen ckpt/CSR/<run>/checkpoint-2500
+bash scripts/eval.sh Base qwen                              # the frozen model
+bash scripts/eval.sh CSR  qwen ckpt/CSR/<run>/checkpoint-2500
 ```
 
-* A subset of datasets, on a chosen GPU
+`eval.sh` picks the right entry point from the method: `evaluation/eval_semantic.py`
+reads confidence off the rollout spread for Base, RLVR and CSR, and
+`evaluation/eval_verbalized.py` parses the confidence token for RD and RLCR. Each run
+writes `results/<run>/{config.yaml,results.json,records.jsonl}`.
+
+**Confidence from token F1 instead of the judge.** Replaces every equivalence call with
+token overlap, which removes the judge dependency:
 
 ```bash
-GPU=6 DATASETS="hotpot trivia" bash scripts/eval.sh CSR qwen ckpt/CSR/<run>/checkpoint-2500
+bash scripts/eval.sh CSR qwen <ckpt> --set judge.backend=f1
+python scripts/f1_judge_eval.py              # the thresholds the paper reports
 ```
 
-* Every finished run as one table
+**Post-hoc estimators on a finished run.** These re-score `results/` and need no GPU;
+no estimator here is ever used during training:
 
-```bash
-python scripts/summarize.py
-```
+| Script | Reports |
+| --- | --- |
+| `analysis/estimators.py` | Semantic Density and SIMBA-UQ's Bayesian aggregation |
+| `analysis/aggregation.py` | SIMBA-UQ's arithmetic aggregation and the `clf-pairs+gen` classifier |
+| `analysis/simba.py` | The same classifier under SIMBA-UQ's own training protocol |
+| `analysis/selective.py` | Selective prediction (AURAC, AUGRC) and inference cost |
+| `analysis/logprobs_hf.py` | Per-answer log-probabilities, the `+gen` feature the two SIMBA rules use |
+| `scripts/rejudge.py` | Re-scoring a finished run with a different judge |
+
+Each file's docstring states what it reproduces and where it departs from the method it
+is named after. They locate runs by name; `analysis/runs.py` holds the naming scheme
+they expect, so point that module at your own runs first.
 
 ## 6. Configuration
 
 Config is layered, each file overriding the one before: `default.yaml`, `judge.yaml`,
 the model, the method, then the dataset. The dataset comes last so it can state its own
-requirements — the context-grounded split needs a larger window than the answer-only
-methods default to. Anything on the command line wins over all of them.
-
-**Context-grounded runs** (`hotpot_context`) therefore need no extra flags: the
-distractor paragraphs put the prompt at roughly 1 500 tokens, which does not fit the
-1 024-token window the answer-only methods use, so
-`configs/datasets/hotpot_context.yaml` raises the sequence lengths and lowers vLLM's
-memory share itself.
+requirements. Anything on the command line wins over all of them.
 
 Three things worth knowing before changing anything:
 
@@ -212,25 +203,6 @@ Three things worth knowing before changing anything:
 * **Rollouts per optimizer step.** `generation_batch_size` counts completions, not
   prompts, so prompts per step is `per_device_train_batch_size * grad_accum /
   num_generations` — 4 at the defaults, hence 2500 steps for one epoch over 10k prompts.
-
-## 7. Appendix Experiments
-
-Each script reads finished runs from `results/` and prints the corresponding table.
-They are post-hoc: no estimator here is ever used during training.
-
-| Script | Reports |
-| --- | --- |
-| `analysis/selective.py` | Selective prediction (AURAC, AUGRC) and inference cost |
-| `analysis/estimators.py` | Semantic Density and SIMBA-UQ's Bayesian aggregation |
-| `analysis/aggregation.py` | SIMBA-UQ's arithmetic aggregation and `clf-pairs+gen` classifier |
-| `analysis/simba.py` | The same classifier under SIMBA-UQ's own training protocol |
-| `analysis/logprobs_hf.py` | Per-answer log-probabilities for the `+gen` features |
-| `scripts/f1_judge_eval.py` | The token-F1 judge variant |
-| `scripts/rejudge.py` | Re-scoring a finished run with a different judge |
-
-Each file's docstring states what it reproduces and where it departs from the method it
-is named after. These scripts locate runs by name; `analysis/runs.py` holds the naming
-scheme they expect, so point that module at your own runs first.
 
 ---
 
