@@ -50,11 +50,14 @@ conda env create -f environment.yml
 conda activate csr
 ```
 
+`environment.yml` is the full solved snapshot; `requirements.txt` is the short
+list of direct dependencies if you would rather install by hand.
+
 The Rewarding-Doubt baseline pins an older stack (Python 3.10.20, PyTorch 2.5.1,
 CUDA 12.4), so it gets a second environment. Activate it only for `train_RD.py`:
 
 ```bash
-conda env create -f environment-rd.yml
+conda env create -f environment-rd.yml      # or requirements-rd.txt
 ```
 
 ## 2. Setup the Judge
@@ -106,7 +109,7 @@ it, and none of these directories are tracked:
 .
 ├── data            # HuggingFace datasets and hub cache
 ├── ckpt            # ckpt/<METHOD>/<run>/checkpoint-<step>
-├── results         # results/<run>/{config.yaml,results.json,records.jsonl}
+├── results         # results/<run>/{config.yaml,results.json,results.csv}
 └── logs
 ```
 
@@ -114,7 +117,7 @@ it, and none of these directories are tracked:
 | --- | --- |
 | Methods | `Base` `CSR` `RLVR` `RLCR` `RD` |
 | Models | `qwen` `llama` `mistral` `qwen14b` |
-| Datasets | `hotpot` `trivia` `msmarco` `nq_open` |
+| Datasets | `hotpot` `hotpot_context` `trivia` `msmarco` `nq_open` |
 
 ## 4. Train
 
@@ -161,7 +164,7 @@ bash scripts/eval.sh CSR  qwen ckpt/CSR/<run>/checkpoint-2500
 `eval.sh` picks the right entry point from the method: `evaluation/eval_semantic.py`
 reads confidence off the rollout spread for Base, RLVR and CSR, and
 `evaluation/eval_verbalized.py` parses the confidence token for RD and RLCR. Each run
-writes `results/<run>/{config.yaml,results.json,records.jsonl}`.
+writes `results/<run>/{config.yaml,results.json,results.csv}`.
 
 **Confidence from token F1 instead of the judge.** Replaces every equivalence call with
 token overlap, which removes the judge dependency:
@@ -214,6 +217,13 @@ Three things worth knowing before changing anything:
 * **Rollouts per optimizer step.** `generation_batch_size` counts completions, not
   prompts, so prompts per step is `per_device_train_batch_size * grad_accum /
   num_generations` — 4 at the defaults, hence 2500 steps for one epoch over 10k prompts.
+
+The shipped defaults follow the current revision of the paper: `beta` 0.01, a fixed
+calibration weight `cali_w` 1.0, training K=8 and evaluation K=16. Earlier preprint
+versions reported `beta` 0.1 and a raw, un-normalized BCE with a 0.1 → 0.2 weight
+range; the reward here is the affine-normalized form (`csr/rewards.py`, scale
+`DELTA_CE` = 13.8155), under which a raw weight `w` corresponds to `w * 13.8155`, so
+that 0.1 → 0.2 range is 1.3816 → 2.7631 in these units.
 
 ---
 

@@ -73,8 +73,7 @@ def main():
     from csr.generation import rollouts_with_tokens
     from csr.judge import make_judge
     from csr.metrics import summarize
-    from csr.modeling import checkpoint_step, load_for_eval, resolve_checkpoints
-    from csr.results import RunDir, print_summary
+    from csr.results import RunDir, checkpoint_step, print_summary, resolve_checkpoints
     from csr.semantic import semantic_confidence
     from csr.text import extract_completion_text, render_generation_prompt
 
@@ -87,10 +86,12 @@ def main():
     checkpoints = resolve_checkpoints(args.ckpt)
     dataset = load_split(cfg, split="eval", size=args.limit)
 
-    # judge phase re-reads rollouts from disk, so it must not take a GPU
+    # judge phase re-reads rollouts from disk, so it must not take a GPU --
+    # csr.modeling imports unsloth, which refuses to load without one
     if args.phase == "judge":
         model = tokenizer = None
     else:
+        from csr.modeling import load_for_eval
         model, tokenizer, _ = load_for_eval(cfg, int(eval_cfg["max_seq_length"]),
                                             checkpoint=None)
 

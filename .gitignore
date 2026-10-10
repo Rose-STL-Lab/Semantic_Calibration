@@ -29,8 +29,6 @@ analysis/qualitative_examples.py
 _archive/
 analysis/semdens_formal.py
 
-tests/
-configs/datasets/hotpot_context.yaml
 
 # One-off launchers and probes. The entry points are scripts/train.sh,
 # scripts/eval.sh and scripts/serve/serve_judge.sh.
@@ -70,3 +68,4 @@ reward_patch_notes.md
 nohup.out
 .idea/
 .vscode/
+*.ipynb

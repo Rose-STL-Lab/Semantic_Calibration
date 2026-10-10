@@ -191,19 +191,19 @@ class RewardComputer:
 
         answers = [normalize_for_equiv(c, self.markers) for c in completions]
         questions = [extract_user_question(p) for p in prompts]
-        golds = [normalize_for_equiv(gold_for_row(answer, i, batch, n), self.markers)
-                 for i in range(n)]
+        # the alias list must stay intact: normalize_for_equiv keeps only the first
+        # alias, so "Mumbai" would miss gold ["Bombay", "Mumbai"]
+        golds = [gold_for_row(answer, i, batch, n) for i in range(n)]
 
-        # HotpotQA ("judge") scores correctness with the equivalence prompt; a "gold"
-        # dataset needs the directional prompts, where a list of golds means aliases
-        if self.kind == "judge":
-            template = None
-        elif isinstance(answer, (list, tuple)) and answer and isinstance(answer[0], (list, tuple)):
-            template = self.judge.multi_gold_prompt
-        else:
-            template = self.judge.single_gold_prompt
-        labels, unparsed = self.judge.correctness_batched(
-            preds=answers, golds=golds, questions=questions, template=template)
+        # score_against_gold_batch renders each gold with format_gold and picks the
+        # equivalence / single-gold / multi-gold template per row, exactly as the
+        # evaluation path does
+        before = int(self.judge.correctness_stats["unparsed"])
+        rows = self.judge.score_against_gold_batch(
+            preds_list=[[a] for a in answers], golds=golds,
+            questions=questions, kind=self.kind)
+        labels = [row[0] for row in rows]
+        unparsed = int(self.judge.correctness_stats["unparsed"]) - before
         if unparsed:
             print(f"[judge] {unparsed}/{len(labels)} correctness verdicts unparsed")
         return [self.corr_w if y == 1 else 0.0 for y in labels]

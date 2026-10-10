@@ -99,40 +99,6 @@ def load_for_eval(cfg, max_seq_length: int, checkpoint: str | None = None,
     model = model.eval()
     return model, tokenizer, lora_request
 
-
-def resolve_checkpoints(path: str | None) -> list[str | None]:
-    """Expand ``--ckpt``: one ``checkpoint-N`` directory, a parent holding several,
-    or ``None`` for a base-model run."""
-    if not path:
-        return [None]
-
-    clean = path.rstrip("/")
-    if not os.path.isdir(clean):
-        raise FileNotFoundError(f"checkpoint path does not exist: {clean}")
-
-    base = os.path.basename(clean)
-    if base.startswith("checkpoint-") or base.startswith("model_finetuned"):
-        return [clean]
-
-    children = []
-    for name in sorted(os.listdir(clean)):
-        full = os.path.join(clean, name)
-        if os.path.isdir(full) and (name.startswith("checkpoint-")
-                                    or name.startswith("model_finetuned")):
-            children.append(full)
-    if not children:
-        # a merged / non-PEFT checkpoint directory is itself the checkpoint
-        return [clean]
-
-    def step_of(p):
-        digits = "".join(ch for ch in os.path.basename(p) if ch.isdigit())
-        return int(digits) if digits else -1
-
-    return sorted(children, key=step_of)
-
-
-def checkpoint_step(path: str | None) -> int:
-    if not path:
-        return 0
-    digits = "".join(ch for ch in os.path.basename(str(path).rstrip("/")) if ch.isdigit())
-    return int(digits) if digits else -1
+# resolve_checkpoints / checkpoint_step live in results.py so the judge-only
+# evaluation phase can reach them without importing unsloth.
+from .results import checkpoint_step, resolve_checkpoints  # noqa: E402,F401
