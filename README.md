@@ -180,8 +180,19 @@ no estimator here is ever used during training:
 | `analysis/aggregation.py` | SIMBA-UQ's arithmetic aggregation and the `clf-pairs+gen` classifier |
 | `analysis/simba.py` | The same classifier under SIMBA-UQ's own training protocol |
 | `analysis/selective.py` | Selective prediction (AURAC, AUGRC) and inference cost |
-| `analysis/logprobs_hf.py` | Per-answer log-probabilities, the `+gen` feature the two SIMBA rules use |
 | `scripts/rejudge.py` | Re-scoring a finished run with a different judge |
+
+Semantic Density and both SIMBA rules read one extra per-rollout feature, the mean token
+log-probability. `analysis/logprobs_hf.py` writes it once per run and is the only script
+here that loads the backbone, so it is the one that needs a GPU:
+
+```bash
+python analysis/logprobs_hf.py --model qwen7b --method CSR --datasets hotpot trivia
+```
+
+Without that file SemDens falls back to uniform weights and `clf-pairs+gen` scores
+similarities only, which `--no-logprobs` also forces for a like-for-like comparison
+across backbones.
 
 Each file's docstring states what it reproduces and where it departs from the method it
 is named after. They locate runs by name; `analysis/runs.py` holds the naming scheme
