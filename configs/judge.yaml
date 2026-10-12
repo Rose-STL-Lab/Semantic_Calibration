@@ -2,9 +2,10 @@
 # Credentials come from the env only: OPENAI_API_KEY (+ OPENAI_API_VERSION and OPENAI_AZURE_ENDPOINT for Azure).
 
 judge:
-  # llm = the prompts below; f1 = token-level F1 only (csr/f1_judge.py), no model
-  # and no API key, which leaves the rest of this file unused. --set judge.backend=f1
-  backend: llm
+  # Correctness is always judged by the model below. `equivalence: f1` replaces only
+  # the rollout-vs-rollout equivalence call with token F1 (csr/f1_judge.py) -- the
+  # CSR-F1 configuration. --set judge.equivalence=f1
+  equivalence: llm
   f1_threshold: 0.5          # reported taus: 0.50 Llama/Mistral, 0.80 Qwen
 
   model_id: gpt-4.1-nano

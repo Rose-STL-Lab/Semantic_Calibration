@@ -19,7 +19,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from csr.config import (add_common_args, checkpoint_dir, dump_config, load_config,
-                        seed_everything, setup_env)
+                        seed_everything)
 
 
 def parse_args():
@@ -37,7 +37,6 @@ def parse_args():
 def main():
     args = parse_args()
     cfg = load_config("RLCR", args.model, args.dataset, args.overrides)
-    setup_env(cfg)
     seed = int(cfg["seed"])
     seed_everything(seed)
 

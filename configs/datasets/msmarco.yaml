@@ -1,7 +1,5 @@
 dataset:
   name: msmarco
-  display_name: MSMARCO
-  role: out-of-distribution
   hf:
     path: microsoft/ms_marco
     config: v1.1

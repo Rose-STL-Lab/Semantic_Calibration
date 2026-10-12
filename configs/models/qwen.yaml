@@ -1,6 +1,5 @@
 model:
   name: qwen
-  display_name: Qwen2.5-7B-Instruct
 
   # checkpoints live in ckpt/<METHOD>/<ckpt_name>/
   ckpt_name: qwen7b

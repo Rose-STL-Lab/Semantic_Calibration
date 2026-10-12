@@ -17,8 +17,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from csr.config import add_common_args, default_exp_name, load_config, seed_everything, setup_env
-from csr.text import UNPARSED_CONFIDENCE
+from csr.config import add_common_args, default_exp_name, load_config, seed_everything
+from csr.parsing import UNPARSED_CONFIDENCE
 
 VERBALIZED_METHODS = {"RD", "RLCR"}
 
@@ -51,7 +51,6 @@ def main():
                          f"use evaluation/eval_semantic.py instead")
 
     cfg = load_config(args.method, args.model, args.dataset, args.overrides)
-    setup_env(cfg)
     seed_everything(int(cfg["seed"]))
 
     from tqdm.auto import tqdm
@@ -62,7 +61,8 @@ def main():
     from csr.metrics import summarize
     from csr.modeling import checkpoint_step, load_for_eval, resolve_checkpoints
     from csr.results import RunDir, print_summary
-    from csr.text import parse_verbalized_output, render_generation_prompt
+    from csr.generation import render_generation_prompt
+    from csr.parsing import parse_verbalized_output
 
     eval_cfg = cfg["method"]["eval"]
     conf_cfg = cfg["method"]["confidence"]

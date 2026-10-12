@@ -28,7 +28,10 @@ RUN_TEMPLATES = {
 # off a verbalized scalar.
 SEMANTIC_METHODS = {"Base", "RLVR", "CSR"}
 
-DATASET_NAMES = [name for name, _ in DATASETS]
+# SemDens and the SIMBA rules read per-rollout semantic clusters, which only the
+# sampling-based methods record, so they iterate this instead of RUN_TEMPLATES.
+SEMANTIC_TEMPLATES = {m: t for m, t in RUN_TEMPLATES.items() if m in SEMANTIC_METHODS}
+
 
 
 def run_name(method: str, model: str, dataset: str) -> str:

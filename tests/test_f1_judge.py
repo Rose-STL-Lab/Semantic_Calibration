@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Token-F1 judge (csr/f1_judge.py); needs no GPU, API key or judge server.
+"""Token-F1 equivalence (csr/f1_judge.py); needs no GPU, API key or judge server.
 
     python tests/test_f1_judge.py
 """
@@ -15,9 +15,9 @@ from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from csr.config import load_config  # noqa: E402
-from csr.f1_judge import F1Judge, f1_score, f1_score_aliases, normalize_answer  # noqa: E402
-from csr.judge import Judge, make_judge  # noqa: E402
-from csr.rewards import RewardComputer  # noqa: E402
+from csr.f1_judge import (  # noqa: E402
+    F1EquivalenceJudge, f1_score, f1_score_aliases, normalize_answer,
+)
 
 FAILURES: list[str] = []
 
@@ -116,177 +116,72 @@ def test_f1_values():
     check("None prediction scores 0.0", f1_score_aliases(None, ["Paris"]) == 0.0)
 
 
-def make_judge_f1(threshold=0.5):
-    cfg = load_config("CSR", "llama", "hotpot",
-                      ["judge.backend=f1", f"judge.f1_threshold={threshold}"])
-    return make_judge(cfg, chat_end_markers=cfg["model"].get("chat_end_markers", []))
 
 
-def test_factory():
-    print("\n[factory dispatches on judge.backend]")
-    cfg_llm = load_config("CSR", "llama", "hotpot")
-    check("default backend is the LLM judge", isinstance(make_judge(cfg_llm), Judge))
-    check("backend=f1 gives the F1 judge", isinstance(make_judge_f1(), F1Judge))
-    check("backend=f1 is not an LLM judge", not isinstance(make_judge_f1(), Judge))
-
-    cfg_bad = load_config("CSR", "llama", "hotpot", ["judge.backend=nonsense"])
-    try:
-        make_judge(cfg_bad)
-        check("an unknown backend is rejected", False, "no error raised")
-    except ValueError:
-        check("an unknown backend is rejected", True)
-
-    j = make_judge_f1(0.6)
-    check("f1_threshold is read from the config", abs(j.threshold - 0.6) < 1e-12)
-    check("model_id names the rule", j.model_id == "f1@0.6", j.model_id)
 
 
-def test_threshold_is_strict():
-    print("\n[threshold]")
-    j = make_judge_f1(0.5)
-    # "red cat" vs "red dog": 1 shared token of 2 and 2 -> F1 exactly 0.5
+
+
+
+
+
+
+
+
+
+
+
+
+def make_equivalence_judge(threshold=0.5):
+    """The CSR-F1 configuration: token F1 for rollout-rollout equivalence only.
+
+    The ``llm`` slot is a bare object: reclustering touches nothing but
+    ``symmetric_batched``, which is exactly what scripts/f1_judge_eval.py relies on.
+    """
+    return F1EquivalenceJudge(object(), {"judge": {"f1_threshold": threshold}},
+                              chat_end_markers=())
+
+
+def test_equivalence_threshold_is_inclusive():
+    print("\n[F1EquivalenceJudge threshold]")
+    # "red cat" vs "red dog": 1 shared token out of 2 and 2 -> F1 exactly 0.5
     exact_half = f1_score("red cat", "red dog")
     check("this pair sits exactly on the threshold", abs(exact_half - 0.5) < 1e-12,
           str(exact_half))
-    labels = j.score_against_gold(["red cat"], "red dog", "q")
-    check("F1 == threshold counts as wrong (RD uses `> threshold`)",
-          labels == [0], str(labels))
+    j = make_equivalence_judge(0.5)
+    labels, unparsed, missing = j.symmetric_batched(["red cat"], ["red dog"], ["q"])
+    # F1Judge uses `>` like RD; F1EquivalenceJudge uses `>=`, as the CSR-F1 scripts do.
+    check("F1 == threshold counts as EQUIVALENT (`>=`)", labels == [1], str(labels))
+    check("equivalence verdicts are never unparsable", unparsed == 0 and missing == [])
 
-    j_low = make_judge_f1(0.4)
-    check("lowering the threshold flips it",
-          j_low.score_against_gold(["red cat"], "red dog", "q") == [1])
+    j_high = make_equivalence_judge(0.6)
+    check("raising the threshold flips it",
+          j_high.symmetric_batched(["red cat"], ["red dog"], ["q"])[0] == [0])
 
 
-def test_judge_contract():
-    print("\n[Judge interface contract]")
-    j = make_judge_f1()
-
-    labels, unparsed, missing = j.symmetric_batched(["Paris", "Berlin"],
-                                                    ["paris", "Paris"], ["q", "q"])
-    check("symmetric_batched returns (labels, unparsed, missing)",
-          labels == [1, 0] and unparsed == 0 and missing == [],
-          f"{labels} {unparsed} {missing}")
-
-    a, b = "The Eiffel Tower", "eiffel tower"
-    fwd, _, _ = j.symmetric_batched([a], [b], ["q"])
-    rev, _, _ = j.symmetric_batched([b], [a], ["q"])
+def test_equivalence_is_symmetric():
+    print("\n[F1EquivalenceJudge symmetry]")
+    j = make_equivalence_judge()
+    a, b = "The Eiffel Tower", "Eiffel Tower"
+    fwd = j.symmetric_batched([a], [b], ["q"])[0]
+    rev = j.symmetric_batched([b], [a], ["q"])[0]
     check("equivalence is symmetric by construction", fwd == rev == [1],
           f"{fwd} vs {rev}")
 
-    labels, unparsed = j.correctness_batched(["Paris"], ["paris"], ["q"])
-    check("correctness_batched returns (labels, unparsed)",
-          labels == [1] and unparsed == 0, f"{labels} {unparsed}")
 
-    # gold may be one string or a list of aliases; both kinds score the same way
-    check("a single gold string works", j.score_against_gold(["Paris"], "Paris", "q") == [1])
-    check("a gold alias list works",
-          j.score_against_gold(["Paris"], ["London", "Paris"], "q") == [1])
-    check("kind='gold' and kind='judge' agree (there is no prompt to pick)",
-          j.score_against_gold(["Paris"], ["London", "Paris"], "q", "gold")
-          == j.score_against_gold(["Paris"], ["London", "Paris"], "q", "judge"))
-
-    preds_list = [["Paris", "Lyon"], ["Berlin"]]
-    golds = ["Paris", ["Berlin", "berlin city"]]
-    questions = ["q1", "q2"]
-    batched = j.score_against_gold_batch(preds_list, golds, questions)
-    one_by_one = [j.score_against_gold(p, g, q)
-                  for p, g, q in zip(preds_list, golds, questions)]
-    check("score_against_gold_batch equals the per-question path",
-          batched == one_by_one == [[1, 0], [1]], f"{batched} vs {one_by_one}")
-
-    for attr in ("single_gold_prompt", "multi_gold_prompt", "cache", "model_id"):
-        check(f"exposes .{attr} (read off the judge elsewhere)", hasattr(j, attr))
-
-
-def test_stats_block():
-    print("\n[stats block]")
-    j = make_judge_f1()
-    j.score_against_gold(["Paris", "Berlin"], "Paris", "q")
-    j.symmetric_batched(["a"], ["a"], ["q"])
-    stats = j.stats_summary()
-
-    # JudgeCacheCallback reads exactly these
-    for key in ("cache_size", "correctness", "semantic_equivalence"):
-        check(f"stats_summary has {key!r}", key in stats)
-    for block in ("correctness", "semantic_equivalence"):
-        for key in ("total", "unparsed", "parsed_yes", "parsed_no", "unparsed_rate"):
-            check(f"{block}.{key} present", key in stats[block])
-    check("correctness counted 2 verdicts", stats["correctness"]["total"] == 2,
-          str(stats["correctness"]))
-    check("equivalence counted 1 verdict", stats["semantic_equivalence"]["total"] == 1)
-    check("nothing is ever unparsed", stats["correctness"]["unparsed"] == 0
-          and stats["semantic_equivalence"]["unparsed"] == 0)
-    check("the block records the backend", stats.get("backend") == "f1")
-
-    j.reset_stats()
-    check("reset_stats clears the counters",
-          j.stats_summary()["correctness"]["total"] == 0)
-
-
-def test_answer_extraction():
-    print("\n[answer extraction matches the LLM path]")
-    j = make_judge_f1()
-    # canonicalize_answer strips an "Answer:" prefix, as it does before the LLM
-    # judge is asked, so the two backends see the same string.
-    check("an 'Answer:' prefix is stripped before scoring",
-          j.score_against_gold(["Answer: Paris"], "Paris", "q") == [1])
-    check("a trailing period does not matter",
-          j.score_against_gold(["Paris."], "Paris", "q") == [1])
-
-
-def test_determinism_and_offline():
-    print("\n[deterministic and offline]")
-    j1, j2 = make_judge_f1(), make_judge_f1()
-    preds = ["Paris", "the city of Paris", "Berlin", ""]
-    r1 = j1.score_against_gold(preds, ["Paris", "paris france"], "q")
-    r2 = j2.score_against_gold(preds, ["Paris", "paris france"], "q")
-    check("two fresh judges give identical verdicts", r1 == r2, f"{r1} vs {r2}")
-    check("no API key was needed", "OPENAI_API_KEY" not in os.environ
-          or True)  # the point: nothing above raised
-    check("the judge holds no client", not hasattr(j1, "_client"))
-
-
-def test_calibration_reward_runs_on_f1():
-    print("\n[CSR's calibration reward on the F1 judge]")
-    cfg = load_config("CSR", "llama", "hotpot", ["judge.backend=f1"])
-    judge = make_judge(cfg)
-    rc = RewardComputer(cfg, judge)
-    rc.cali_w = 1.0
-
-    k = 8
-    texts = ["Paris", "paris", "Paris.", "Berlin", "Lyon", "Paris", "Berlin", "Rome"]
-    prompt = [{"role": "system", "content": "s"},
-              {"role": "user", "content": "capital of France?"}]
-    prompts = [prompt] * k
-    completions = [[{"role": "assistant", "content": t}] for t in texts]
-    answers = ["Paris"] * k
-
-    rewards = rc.calibration_reward(prompts, completions, answers)
-    check(f"returns one reward per rollout ({k})", len(rewards) == k, str(len(rewards)))
-    check("every reward lies in [0, 1] at cali_w=1",
-          all(-1e-6 <= r <= 1 + 1e-6 for r in rewards),
-          str([round(r, 4) for r in rewards]))
-
-    # reward = agreement fraction z_j = mean_{i!=j} 1[s_ji == q_j]; the F1 judge puts
-    # Paris/paris/"Paris." in one cluster, so a wrong isolated rollout scores higher
-    # than a correct one -- by design: the term rewards agreement structure, not correctness
-    want = [3 / 7, 3 / 7, 3 / 7, 6 / 7, 1.0, 3 / 7, 6 / 7, 1.0]
-    check("reward equals the agreement fraction of each rollout",
-          all(abs(g - w) < 1e-4 for g, w in zip(rewards, want)),
-          f"{[round(r, 4) for r in rewards]} vs {[round(w, 4) for w in want]}")
-    check("an isolated wrong rollout scores 1.0 (nobody agrees, and it is wrong)",
-          abs(rewards[4] - 1.0) < 1e-4 and abs(rewards[7] - 1.0) < 1e-4,
-          str([round(r, 4) for r in rewards]))
-    check("the F1 judge clusters Paris / paris / 'Paris.' together",
-          abs(rewards[0] - rewards[1]) < 1e-6 and abs(rewards[0] - rewards[2]) < 1e-6,
-          str([round(r, 4) for r in rewards]))
-
-    corr = rc.correctness_reward(prompts, completions, answers)
-    check("correctness marks the Paris rollouts right and the others wrong",
-          [int(c) for c in corr] == [1, 1, 1, 0, 0, 1, 0, 0],
-          str(corr))
-    check("the judge was asked for both terms without an LLM",
-          judge.stats_summary()["correctness"]["total"] > 0)
+def test_equivalence_stats_and_delegation():
+    print("\n[F1EquivalenceJudge stats and delegation]")
+    j = make_equivalence_judge()
+    j.symmetric_batched(["Paris", "paris"], ["Paris", "Lyon"], ["q", "q"])
+    stats = j.f1_same_stats
+    check("f1_same_stats counts every pair", stats["total"] == 2, str(stats))
+    check("one pair matched, one did not",
+          stats["parsed_yes"] == 1 and stats["parsed_no"] == 1, str(stats))
+    check("f1 equivalence never reports unparsed", stats["unparsed"] == 0, str(stats))
+    # correctness is NOT replaced: it is delegated to the wrapped LLM judge.
+    check("correctness is delegated, not overridden",
+          "symmetric_batched" in vars(type(j))
+          and "correctness_batched" not in vars(type(j)))
 
 
 def main():
@@ -296,13 +191,9 @@ def main():
 
     test_matches_triviaqa_reference()
     test_f1_values()
-    test_factory()
-    test_threshold_is_strict()
-    test_judge_contract()
-    test_stats_block()
-    test_answer_extraction()
-    test_determinism_and_offline()
-    test_calibration_reward_runs_on_f1()
+    test_equivalence_threshold_is_inclusive()
+    test_equivalence_is_symmetric()
+    test_equivalence_stats_and_delegation()
 
     print("\n" + "=" * 70)
     if FAILURES:

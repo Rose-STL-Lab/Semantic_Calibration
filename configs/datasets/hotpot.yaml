@@ -1,7 +1,5 @@
 dataset:
   name: hotpot
-  display_name: HotpotQA
-  role: in-distribution          # trained on; also the ID evaluation set
   hf:
     path: hotpot_qa
     config: distractor

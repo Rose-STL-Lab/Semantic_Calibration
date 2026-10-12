@@ -1,5 +1,11 @@
-"""Rollout generation: unsloth's vLLM fast path returns all K rollouts in one call,
-otherwise one HuggingFace ``generate`` per rollout.
+"""Rollout generation, plus the prompt rendering that feeds it.
+
+``generate(prompt, n=K)`` returns K rollouts for ONE prompt; unsloth's vLLM fast path
+gets all K back from a single call, otherwise one HuggingFace ``generate`` per rollout.
+The ``_batch`` variants take SEVERAL prompts and still return K rollouts for each, so
+``generate_batch(prompts, n=K)`` is K x len(prompts) completions in one vLLM call --
+that is the ``--question-batch`` path, which exists to amortise the judge's tail latency
+across questions, not to change K.
 """
 
 from __future__ import annotations
@@ -7,6 +13,21 @@ from __future__ import annotations
 from typing import Sequence
 
 import torch
+
+
+def render_generation_prompt(prompt_messages, tokenizer) -> str:
+    """Apply the model's chat template, or fall back to a plain concatenation."""
+    if isinstance(prompt_messages, list) and hasattr(tokenizer, "apply_chat_template") \
+            and getattr(tokenizer, "chat_template", None):
+        return tokenizer.apply_chat_template(
+            prompt_messages, tokenize=False, add_generation_prompt=True
+        )
+    if isinstance(prompt_messages, list):
+        chunks = []
+        for msg in prompt_messages:
+            chunks.append(str(msg.get("content", "")) if isinstance(msg, dict) else str(msg))
+        return "\n\n".join(chunks).strip() + "\n\nAnswer:"
+    return str(prompt_messages)
 
 
 def count_tokens(tokenizer, text) -> int:

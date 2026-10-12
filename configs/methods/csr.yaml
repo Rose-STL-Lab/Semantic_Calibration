@@ -1,21 +1,20 @@
 # CSR = RLVR's correctness reward + a semantic calibration reward whose weight
-# follows a linear schedule from cali_w_start to cali_w_end (constant when equal).
+# runs from cali_w_start to cali_w_end under cali_w_schedule (constant when equal).
 # Answer-only: no chain-of-thought, no verbalized confidence token.
 method:
   name: CSR
-  kind: semantic
-  trainable: true
   system_prompt: |-
     Provide a concise and direct answer to the question. Avoid unnecessary explanations or additional text.
 
   train:
-    algorithm: grpo
     reward: calibration_correctness
     corr_w: 1.0                    # weight on the binary correctness reward
-    cali_w_start: 1.0              # calibration weight, held constant
-    cali_w_end: 1.0
+    cali_w_start: 0.8              # calibration weight, ramped 0.8 -> 1.2
+    cali_w_end: 1.2
+    cali_w_schedule: sigmoid       # linear | sigmoid (equal endpoints = constant)
     # Both rewards are on [0, 1], so the two weights are directly comparable.
-    # Above ~1.4 the policy fragments; above ~2.7 it collapses onto one answer.
+    # A constant weight above ~1.4 fragments the policy; above ~2.7 it collapses
+    # onto one answer, which is why the ramp above stays well inside that range.
     # TRL's scale_rewards='group' is relied on and deliberately left unset.
     max_seq_length: 1024
     max_prompt_length: 256

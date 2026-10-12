@@ -1,6 +1,5 @@
 model:
   name: llama
-  display_name: Llama-3.1-8B-Instruct
 
   # checkpoints live in ckpt/<METHOD>/<ckpt_name>/
   ckpt_name: llama8b

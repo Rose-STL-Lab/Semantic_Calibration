@@ -1,12 +1,9 @@
 method:
   name: RLVR
-  kind: semantic
-  trainable: true
   system_prompt: |-
     Provide a concise and direct answer to the question. Avoid unnecessary explanations or additional text.
 
   train:
-    algorithm: grpo
     reward: correctness            # binary correctness only, no calibration term
     corr_w: 1.0
     max_seq_length: 1024

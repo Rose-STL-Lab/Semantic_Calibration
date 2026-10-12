@@ -14,10 +14,9 @@ from transformers import TrainerCallback
 class MetricCSVCallback(TrainerCallback):
     """Mirror TRL's scalar logs into ``<run_dir>/train_metrics.csv``."""
 
-    def __init__(self, out_dir: str, csv_name: str = "train_metrics.csv",
-                 extra: dict | None = None):
+    def __init__(self, out_dir: str, extra: dict | None = None):
         os.makedirs(out_dir, exist_ok=True)
-        self.csv_path = os.path.join(out_dir, csv_name)
+        self.csv_path = os.path.join(out_dir, "train_metrics.csv")
         self.extra = extra or {}
         self._fh = open(self.csv_path, "w", newline="", encoding="utf-8")
         self._writer = None
@@ -49,11 +48,12 @@ class MetricCSVCallback(TrainerCallback):
 
 
 class CalibrationRampCallback(TrainerCallback):
-    """Advance CSR's calibration weight linearly with training progress."""
+    """Advance CSR's calibration weight with training progress, on the schedule
+    configured by cali_w_schedule (linear or sigmoid; equal endpoints are constant)."""
 
-    def __init__(self, reward_computer, print_every_steps: int = 25):
+    def __init__(self, reward_computer):
         self.rewards = reward_computer
-        self.print_every_steps = int(print_every_steps)
+        self.print_every_steps = 25
 
     def on_step_end(self, args, state, control, **kwargs):
         progress = 0.0
@@ -69,9 +69,9 @@ class CalibrationRampCallback(TrainerCallback):
 class JudgeCacheCallback(TrainerCallback):
     """Periodically report judge cache hit rate -- purely informational."""
 
-    def __init__(self, judge, print_every_steps: int = 25):
+    def __init__(self, judge):
         self.judge = judge
-        self.print_every_steps = int(print_every_steps)
+        self.print_every_steps = 25
 
     def on_step_end(self, args, state, control, **kwargs):
         if not self.print_every_steps or state.global_step % self.print_every_steps:
@@ -91,18 +91,16 @@ class PeriodicEvalCallback(TrainerCallback):
     """
 
     def __init__(self, cfg, dataset, tokenizer, judge, run_dir: str,
-                 correctness_prompt_kind: str = "judge", every_steps: int = 250,
-                 limit: int | None = None, csv_name: str = "validation_metrics.csv"):
+                 correctness_prompt_kind: str = "judge", every_steps: int = 250):
         self.cfg = cfg
         self.dataset = dataset
         self.tokenizer = tokenizer
         self.judge = judge
         self.every_steps = int(every_steps)
-        self.limit = limit
         self.run_dir = run_dir
         self.kind = correctness_prompt_kind
         os.makedirs(run_dir, exist_ok=True)
-        self.csv_path = os.path.join(run_dir, csv_name)
+        self.csv_path = os.path.join(run_dir, "validation_metrics.csv")
         self._fh = open(self.csv_path, "w", newline="", encoding="utf-8")
         self._writer = None
         print(f"[validation] {self.csv_path}")
@@ -136,12 +134,13 @@ class PeriodicEvalCallback(TrainerCallback):
         self._report(state, step, adapter, started, confidences, accuracies, records)
 
     def _n(self) -> int:
-        return len(self.dataset) if self.limit is None else min(self.limit, len(self.dataset))
+        return len(self.dataset)
 
     def _collect(self, model, lora_request):
         from .generation import rollouts_with_tokens
         from .semantic import semantic_confidence
-        from .text import extract_completion_text, render_generation_prompt
+        from .generation import render_generation_prompt
+        from .parsing import extract_completion_text
 
         train_cfg = self.cfg["method"]["train"]
         markers = self.cfg["model"].get("chat_end_markers", [])
@@ -236,7 +235,8 @@ class VerbalizedEvalCallback(PeriodicEvalCallback):
 
     def _collect(self, model, lora_request):
         from .generation import count_tokens, generate
-        from .text import UNPARSED_CONFIDENCE, parse_verbalized_output, render_generation_prompt
+        from .generation import render_generation_prompt
+        from .parsing import UNPARSED_CONFIDENCE, parse_verbalized_output
 
         train_cfg = self.cfg["method"]["train"]
         conf_cfg = self.cfg["method"]["confidence"]

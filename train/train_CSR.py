@@ -2,7 +2,8 @@
 """CSR: GRPO with a verifiable correctness reward plus a semantic calibration reward.
 
 Answer-only: no chain-of-thought, no verbalized confidence. The calibration weight
-runs cali_w_start -> cali_w_end (equal by default, so constant).
+runs cali_w_start -> cali_w_end under cali_w_schedule (0.8 -> 1.2 on a sigmoid by
+default; equal endpoints make any schedule constant).
 Hyperparameters: configs/methods/csr.yaml, overridable with --set.
 
     python train/train_CSR.py --model qwen

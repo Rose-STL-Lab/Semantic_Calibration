@@ -17,9 +17,7 @@ from sklearn.model_selection import GroupKFold
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from analysis.runs import (  # noqa: E402
-    DATASETS, MODELS, MODEL_LABELS, RUN_TEMPLATES, SEMANTIC_METHODS, run_name,
-)
+from analysis.runs import DATASETS, SEMANTIC_TEMPLATES  # noqa: E402
 
 from csr.metrics import expected_calibration_error          # noqa: E402
 from analysis.estimators import jaccard, tokens, load_run  # noqa: E402
@@ -93,7 +91,7 @@ RULES = {"arithmetic": arithmetic, "clf-pairs+gen": clf_pairs_gen}
 
 
 NO_LOGPROBS = False          # set by --no-logprobs; see attach_logprobs
-# --logprobs-name; the transformers scorer reproduces Table 7, vLLM's logprobs.json (qwen7b only) does not
+# the transformers scorer (analysis/logprobs_hf.py) is what reproduces Table 7
 LOGPROBS_NAME = "logprobs_hf.json"
 
 
@@ -113,8 +111,10 @@ def attach_logprobs(exp: str, records: list[dict], k: int) -> bool:
 def score(exp: str, k: int) -> dict[str, tuple[float, float]]:
     records = load_run(exp, k)
     if not attach_logprobs(exp, records, k):
-        print(f"[warn] {exp}: no logprobs.json, '+gen' falls back to length only",
-              file=sys.stderr)
+        why = ("--no-logprobs" if NO_LOGPROBS
+               else f"no {LOGPROBS_NAME} (write it with analysis/logprobs_hf.py)")
+        print(f"[warn] {exp}: {why}, so clf-pairs+gen drops the '+gen' feature "
+              f"and fits the similarities alone", file=sys.stderr)
     acc = np.asarray([np.mean(r["correct"]) for r in records], dtype=float)
     labels = (acc >= 0.5).astype(int)
     out = {}
@@ -127,7 +127,7 @@ def score(exp: str, k: int) -> dict[str, tuple[float, float]]:
 
 def collect(k: int, model: str = MODEL) -> dict:
     table = {}
-    for method, pattern in RUN_TEMPLATES.items():
+    for method, pattern in SEMANTIC_TEMPLATES.items():
         per_ds = {}
         for ds, _ in DATASETS:
             exp = pattern.format(model=model, dataset=ds)
@@ -146,13 +146,13 @@ def collect(k: int, model: str = MODEL) -> dict:
 def render(table: dict, latex: bool) -> None:
     cols = [d for d, _ in DATASETS] + ["avg"]
     for rule in RULES:
-        best_e = {c: min(table[(rule, m)][c][0] for m in RUN_TEMPLATES) for c in cols}
-        best_a = {c: max(table[(rule, m)][c][1] for m in RUN_TEMPLATES) for c in cols}
+        best_e = {c: min(table[(rule, m)][c][0] for m in SEMANTIC_TEMPLATES) for c in cols}
+        best_a = {c: max(table[(rule, m)][c][1] for m in SEMANTIC_TEMPLATES) for c in cols}
         if not latex:
             print(f"\n### {rule}")
             print("| Method | " + " | ".join(t for _, t in DATASETS) + " | Avg |")
             print("|" + "---|" * (len(cols) + 1))
-        for method in RUN_TEMPLATES:
+        for method in SEMANTIC_TEMPLATES:
             cells = []
             for c in cols:
                 e, a = table[(rule, method)][c]
@@ -170,16 +170,12 @@ def render(table: dict, latex: bool) -> None:
 
 
 def main() -> None:
-    global NO_LOGPROBS, LOGPROBS_NAME
+    global NO_LOGPROBS
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--k", type=int, default=16)
-    parser.add_argument("--logprobs-name", default=LOGPROBS_NAME,
-                        help="which log-probability file to read from each run; "
-                             "the default is the transformers scorer used for the "
-                             "published table")
     parser.add_argument("--no-logprobs", action="store_true",
-                        help="drop the '+gen' log-probability feature and use "
-                             "the answer length alone, so every backbone is "
+                        help="drop the '+gen' log-probability feature and fit the "
+                             "pairwise similarities alone, so every backbone is "
                              "scored by the same recipe")
     parser.add_argument("--model", default=MODEL,
                         help="which backbone's runs to score "
@@ -187,7 +183,6 @@ def main() -> None:
     parser.add_argument("--latex", action="store_true")
     args = parser.parse_args()
     NO_LOGPROBS = args.no_logprobs
-    LOGPROBS_NAME = args.logprobs_name
     render(collect(args.k, args.model), args.latex)
 
 

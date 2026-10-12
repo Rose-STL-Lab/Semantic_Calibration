@@ -16,7 +16,7 @@ from typing import Sequence
 
 from openai import AzureOpenAI, OpenAI
 
-from .text import canonicalize_answer, sanitize_for_judge
+from .parsing import canonicalize_answer, sanitize_for_judge
 
 _YESNO_LINE_RE = re.compile(r"(?im)^\s*CORRECT\s*:\s*(YES|NO)\b")
 _YESNO_ANY_RE = re.compile(r"\b(YES|NO)\b")
@@ -55,7 +55,7 @@ class LRUCache(OrderedDict):
             self.popitem(last=False)
 
 def new_stats() -> dict:
-    return {"total": 0, "parsed_yes": 0, "parsed_no": 0, "unparsed": 0, "examples": []}
+    return {"total": 0, "parsed_yes": 0, "parsed_no": 0, "unparsed": 0}
 
 
 class Judge:
@@ -162,8 +162,6 @@ class Judge:
         preds: Sequence[str],
         golds: Sequence[str],
         questions: Sequence[str],
-        use_cache: bool = True,
-        shortcut: bool = True,
         stats: dict | None = None,
         return_missing: bool = False,
         template: str | None = None,
@@ -195,17 +193,17 @@ class Judge:
             # the calls but put gold in the prediction slot in half of correctness.
             a_uses[i], b_uses[i] = a_use, b_use
 
-            if shortcut and a_use != "" and a_use == b_use:
+            # exact-match shortcut: identical canonical forms need no call
+            if a_use != "" and a_use == b_use:
                 labels[i] = 1
                 continue
 
             key = self._cache_key(template, q, a_use, b_use)
             keys[i] = key
-            if use_cache:
-                cached = self.cache.get_item(key)
-                if cached is not None:
-                    labels[i] = int(cached)
-                    continue
+            cached = self.cache.get_item(key)
+            if cached is not None:
+                labels[i] = int(cached)
+                continue
 
             messages[i] = self._messages(template, q, a_use, b_use)
             pending.append(i)
@@ -245,19 +243,12 @@ class Judge:
                             continue
                         labels[idx] = int(verdict)
                         stats["parsed_yes" if verdict == 1 else "parsed_no"] += 1
-                        if use_cache:
-                            self.cache.set_item(keys[idx], int(verdict))
+                        self.cache.set_item(keys[idx], int(verdict))
             pending = still_pending
 
         unparsed = len(pending)
         if unparsed:
             stats["unparsed"] += unparsed
-            for idx in pending[: max(0, 10 - len(stats["examples"]))]:
-                stats["examples"].append({
-                    "question": (questions[idx] or "")[:120],
-                    "a": (a_uses[idx] or "")[:200],
-                    "b": (b_uses[idx] or "")[:200],
-                })
             # Not cached: one transient failure would become a permanent NO. Callers
             # get label 0 plus the index in `missing` and can drop it instead.
             for idx in pending:
@@ -354,19 +345,19 @@ class Judge:
 
 
 def make_judge(cfg, chat_end_markers: Sequence[str] = ()):
-    """The judge this run is configured to use; every backend has the same methods.
+    """The judge this run is configured to use.
 
-        --set judge.backend=f1                                   # no API key, no server
-        --set judge.equivalence=f1 --set judge.f1_threshold=0.5   # LLM correctness, F1 s_ji
+    Correctness is always the LLM judge, as every reported number is. The one switch
+    replaces the rollout-vs-rollout equivalence call with token F1, which is the CSR-F1
+    configuration of Table 8:
+
+        --set judge.equivalence=f1 --set judge.f1_threshold=0.5
     """
     judge_cfg = cfg["judge"] if "judge" in cfg else cfg
-    backend = str(judge_cfg.get("backend", "llm")).lower()
-    if backend in ("f1", "token_f1"):
-        from .f1_judge import F1Judge      # imported lazily: no openai needed
-        return F1Judge(cfg, chat_end_markers=chat_end_markers)
-    if backend not in ("llm", "api", ""):
-        raise ValueError(f"unknown judge.backend {backend!r}; expected 'llm' or 'f1'")
-
+    if "backend" in judge_cfg:
+        # --set creates unknown keys silently, so a stale judge.backend would be ignored
+        raise ValueError("judge.backend was removed; correctness is always the LLM judge. "
+                         "Use --set judge.equivalence=f1 for the CSR-F1 configuration.")
     judge = Judge(cfg, chat_end_markers=chat_end_markers)
     equivalence = str(judge_cfg.get("equivalence", "llm")).lower()
     if equivalence in ("f1", "token_f1"):
@@ -379,7 +370,7 @@ def make_judge(cfg, chat_end_markers: Sequence[str] = ()):
 
 def format_gold(gold, chat_end_markers: Sequence[str] = ()) -> str:
     """Render a gold answer (string or list of aliases) for the judge prompt."""
-    from .text import normalize_for_equiv
+    from .parsing import normalize_for_equiv
 
     if isinstance(gold, (list, tuple)):
         parts = [normalize_for_equiv(g, chat_end_markers) for g in gold]

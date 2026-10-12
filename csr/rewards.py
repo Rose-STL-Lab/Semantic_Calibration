@@ -9,7 +9,7 @@ from collections import OrderedDict
 
 import torch
 
-from .text import extract_completion_text, extract_user_question, normalize_for_equiv
+from .parsing import extract_completion_text, extract_user_question, normalize_for_equiv
 
 
 # Reachable endpoints of the per-pair BCE.  r_cal = (CE_MAX - mean_ce) / DELTA_CE is an
@@ -51,9 +51,10 @@ class RewardComputer:
         # "linear" default keeps existing runs; start == end makes any schedule constant
         self.cali_w_schedule = str(train_cfg.get("cali_w_schedule", "linear")).lower()
         self.cali_w_sigmoid_slope = float(train_cfg.get("cali_w_sigmoid_slope", 10.0))
-        if self.cali_w_schedule not in ("linear", "sigmoid", "constant"):
+        if self.cali_w_schedule not in ("linear", "sigmoid"):
             raise ValueError(f"unknown method.train.cali_w_schedule "
-                             f"{self.cali_w_schedule!r}; expected linear, sigmoid or constant")
+                             f"{self.cali_w_schedule!r}; expected linear or sigmoid "
+                             f"(equal endpoints already give a constant weight)")
         self.cali_w = self.cali_w_start
         self._verdict_cache: dict[bytes, list[int]] = {}
 
@@ -63,8 +64,6 @@ class RewardComputer:
         hit exactly 0 and 1 (raw slope 10 would start at 0.0067, missing cali_w_start)."""
         if self.cali_w_schedule == "linear":
             return p
-        if self.cali_w_schedule == "constant":
-            return 0.0
         a = self.cali_w_sigmoid_slope
         lo, hi = 1.0 / (1.0 + math.exp(a / 2.0)), 1.0 / (1.0 + math.exp(-a / 2.0))
         return (1.0 / (1.0 + math.exp(-a * (p - 0.5))) - lo) / (hi - lo)

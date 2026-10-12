@@ -21,7 +21,7 @@ import random
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from csr.config import (add_common_args, checkpoint_dir, dump_config, load_config,
-                        seed_everything, setup_env)
+                        seed_everything)
 
 from trl import PPOConfig
 from torch.utils.data import DataLoader
@@ -612,7 +612,6 @@ def parse_args():
 def main():
     args = parse_args()
     cfg = load_config("RD", args.model, args.dataset, args.overrides)
-    setup_env(cfg)
 
     train_cfg = cfg["method"]["train"]
     seed_everything(int(cfg["seed"]))

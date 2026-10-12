@@ -20,9 +20,7 @@ from sklearn.model_selection import GroupKFold
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from analysis.runs import (  # noqa: E402
-    DATASETS, MODELS, MODEL_LABELS, RUN_TEMPLATES, SEMANTIC_METHODS, run_name,
-)
+from analysis.runs import DATASETS, MODELS, SEMANTIC_TEMPLATES  # noqa: E402
 
 from csr.metrics import expected_calibration_error      # noqa: E402
 
@@ -178,7 +176,7 @@ def collect(k: int) -> dict:
     """{(estimator, model, method): {dataset: (ece, auroc), 'avg': ...}}"""
     table = {}
     for model in MODELS:
-        for method, pattern in RUN_TEMPLATES.items():
+        for method, pattern in SEMANTIC_TEMPLATES.items():
             per_ds = {}
             for ds, _ in DATASETS:
                 exp = pattern.format(model=model, dataset=ds)
@@ -203,7 +201,7 @@ def print_markdown(table: dict, k: int) -> None:
         print("| Model | Method | " + " | ".join(t for _, t in DATASETS) + " | Avg |")
         print("|" + "---|" * (len(DATASETS) + 3))
         for model in MODELS:
-            for method in RUN_TEMPLATES:
+            for method in SEMANTIC_TEMPLATES:
                 cells = table.get((name, model, method), {})
                 row = []
                 for ds, _ in DATASETS + [("avg", "Avg")]:
@@ -217,7 +215,7 @@ def print_latex(table: dict, k: int) -> None:
     for name in ESTIMATORS:
         print(f"% ---- {name} ----")
         for model in MODELS:
-            for method in RUN_TEMPLATES:
+            for method in SEMANTIC_TEMPLATES:
                 cells = table.get((name, model, method), {})
                 row = []
                 for ds, _ in DATASETS + [("avg", "Avg")]:

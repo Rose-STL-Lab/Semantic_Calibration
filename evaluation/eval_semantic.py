@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from csr.config import add_common_args, default_exp_name, load_config, seed_everything, setup_env
+from csr.config import add_common_args, default_exp_name, load_config, seed_everything
 
 SEMANTIC_METHODS = {"Base", "RLVR", "CSR"}
 
@@ -63,10 +63,9 @@ def main():
         raise SystemExit("--method Base evaluates the frozen model and takes no --ckpt")
 
     cfg = load_config(args.method, args.model, args.dataset, args.overrides)
-    setup_env(cfg)
     seed_everything(int(cfg["seed"]))
 
-    # imported after setup_env so the HF cache env is in place
+    # deferred: csr.generation pulls in torch, which a --help run should not pay for
     from tqdm.auto import tqdm
 
     from csr.data import correctness_prompt_kind, load_split
@@ -75,7 +74,8 @@ def main():
     from csr.metrics import summarize
     from csr.results import RunDir, checkpoint_step, print_summary, resolve_checkpoints
     from csr.semantic import semantic_confidence
-    from csr.text import extract_completion_text, render_generation_prompt
+    from csr.generation import render_generation_prompt
+    from csr.parsing import extract_completion_text
 
     eval_cfg = cfg["method"]["eval"]
     markers = cfg["model"].get("chat_end_markers", [])

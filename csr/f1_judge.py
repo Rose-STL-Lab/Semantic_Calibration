@@ -1,7 +1,7 @@
-"""Token-F1 judge: the same interface as the LLM judge, with no model behind it.
+"""Token-F1 equivalence: equivalent(a, b) = F1(a, b) >= threshold, deterministic and
+offline, wrapped around the LLM judge so correctness labels stay the LLM's.
 
-correct(a, gold) = max_alias F1(a, alias) > threshold, equivalent(a, b) = F1(a, b)
-> threshold -- deterministic, so ``judge.backend: f1`` needs no server and no API key.
+This is the CSR-F1 configuration: ``--set judge.equivalence=f1``.
 """
 
 from __future__ import annotations
@@ -11,10 +11,10 @@ import string
 from collections import Counter
 from typing import Sequence
 
-from .text import canonicalize_answer
+from .parsing import canonicalize_answer
 
 # TriviaQA official eval code, as vendored by RD in rd_util/EvaluationMetrics.py.
-# Verbatim, and not csr.text.normalize_answer (different step order), so this judge
+# Verbatim, and not csr.parsing.normalize_answer (different step order), so this judge
 # and RD's training loop tokenize identically.
 # https://github.com/mandarjoshi90/triviaqa/blob/master/evaluation/triviaqa_evaluation.py
 def normalize_answer(s: str) -> str:
@@ -69,111 +69,21 @@ def _as_aliases(gold) -> list[str]:
     return [str(gold)]
 
 
+def _record(stats: dict, labels: Sequence[int]) -> None:
+    stats["total"] += len(labels)
+    yes = sum(1 for y in labels if y == 1)
+    stats["parsed_yes"] += yes
+    stats["parsed_no"] += len(labels) - yes
+
+
 def new_stats() -> dict:
-    return {"total": 0, "parsed_yes": 0, "parsed_no": 0, "unparsed": 0, "examples": []}
-
-
-class F1Judge:
-    """Drop-in replacement for ``Judge`` that scores with token F1.
-
-    Verdicts are never unparsable, so ``unparsed`` is always 0 and ``missing`` [].
-    """
-
-    def __init__(self, cfg, chat_end_markers: Sequence[str] = ()):
-        judge_cfg = cfg["judge"] if "judge" in cfg else cfg
-        self.threshold = float(judge_cfg.get("f1_threshold", 0.5))
-        # Strictly greater than, as in RD: at the default 0.5 an answer sharing
-        # exactly half its tokens with the gold is wrong, not right.
-        self.model_id = f"f1@{self.threshold:g}"
-        self.chat_end_markers = list(chat_end_markers or ())
-        # No prompts and no network; kept as attributes only because callers read them.
-        self.prompt = None
-        self.single_gold_prompt = None
-        self.multi_gold_prompt = None
-        self.base_url = None
-        # Caching buys nothing here; the attribute stays for len(judge.cache) callers.
-        self.cache: dict = {}
-        self.same_stats = new_stats()
-        self.correctness_stats = new_stats()
-
-    # -- scoring ---------------------------------------------------------
-    def _clean(self, text) -> str:
-        """Same answer extraction the LLM judge applies before it asks."""
-        return canonicalize_answer(text, self.chat_end_markers)
-
-    def _verdict(self, a, aliases: Sequence[str]) -> int:
-        return int(f1_score_aliases(self._clean(a),
-                                    [self._clean(x) for x in aliases]) > self.threshold)
-
-    @staticmethod
-    def _record(stats: dict, labels: Sequence[int]) -> None:
-        stats["total"] += len(labels)
-        yes = sum(1 for y in labels if y == 1)
-        stats["parsed_yes"] += yes
-        stats["parsed_no"] += len(labels) - yes
-
-    # -- the Judge API ---------------------------------------------------
-    def yes_no_batched(self, preds, golds, questions, use_cache: bool = True,
-                       shortcut: bool = True, stats: dict | None = None,
-                       return_missing: bool = False, template=None):
-        assert len(preds) == len(golds) == len(questions)
-        stats = stats if stats is not None else self.same_stats
-        labels = [self._verdict(a, _as_aliases(b)) for a, b in zip(preds, golds)]
-        self._record(stats, labels)
-        return (labels, 0, []) if return_missing else (labels, 0)
-
-    def symmetric_batched(self, a_list, b_list, questions):
-        """One equivalence verdict per pair; F1 is symmetric, so orientation cannot matter."""
-        return self.yes_no_batched(a_list, b_list, questions,
-                                   stats=self.same_stats, return_missing=True)
-
-    def correctness_batched(self, preds, golds, questions, template=None):
-        return self.yes_no_batched(preds, golds, questions,
-                                   stats=self.correctness_stats)
-
-    def score_against_gold(self, preds: Sequence[str], gold, question: str,
-                           kind: str = "judge") -> list[int]:
-        """``kind`` is accepted and ignored: it chooses a prompt, and there is none."""
-        aliases = _as_aliases(gold)
-        labels = [self._verdict(p, aliases) for p in preds]
-        self._record(self.correctness_stats, labels)
-        return labels
-
-    def score_against_gold_batch(self, preds_list, golds, questions,
-                                 kind: str = "judge") -> list[list[int]]:
-        return [self.score_against_gold(preds, gold, question, kind)
-                for preds, gold, question in zip(preds_list, golds, questions)]
-
-    # -- reporting -------------------------------------------------------
-    def stats_summary(self) -> dict:
-        def block(stats):
-            total = int(stats["total"])
-            return {
-                "total": total,
-                "parsed_yes": int(stats["parsed_yes"]),
-                "parsed_no": int(stats["parsed_no"]),
-                "unparsed": 0,
-                "unparsed_rate": 0.0,
-            }
-
-        return {
-            "model_id": self.model_id,
-            "backend": "f1",
-            "f1_threshold": self.threshold,
-            "correctness": block(self.correctness_stats),
-            "semantic_equivalence": block(self.same_stats),
-            "cache_size": 0,
-        }
-
-    def reset_stats(self) -> None:
-        self.same_stats = new_stats()
-        self.correctness_stats = new_stats()
+    return {"total": 0, "parsed_yes": 0, "parsed_no": 0, "unparsed": 0}
 
 
 class F1EquivalenceJudge:
     """LLM judge for correctness, token F1 for rollout-rollout equivalence (CSR-F1).
 
-    Note ``>=`` here, as in the original CSR-F1 scripts, where ``F1Judge`` uses ``>``
+    Note ``>=`` here, as in the original CSR-F1 scripts (RD's own exact-match uses ``>``)
     like RD. Everything except ``symmetric_batched`` forwards to the LLM judge.
     """
 
@@ -195,7 +105,7 @@ class F1EquivalenceJudge:
                          canonicalize_answer(b, self.chat_end_markers)) >= self.threshold)
             for a, b in zip(a_list, b_list)
         ]
-        F1Judge._record(self.f1_same_stats, labels)
+        _record(self.f1_same_stats, labels)
         return labels, 0, []
 
     def stats_summary(self) -> dict:

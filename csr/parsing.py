@@ -121,21 +121,6 @@ def normalize_answer(s) -> str:
     return " ".join(text.split()).strip()
 
 
-def render_generation_prompt(prompt_messages, tokenizer) -> str:
-    """Apply the model's chat template, or fall back to a plain concatenation."""
-    if isinstance(prompt_messages, list) and hasattr(tokenizer, "apply_chat_template") \
-            and getattr(tokenizer, "chat_template", None):
-        return tokenizer.apply_chat_template(
-            prompt_messages, tokenize=False, add_generation_prompt=True
-        )
-    if isinstance(prompt_messages, list):
-        chunks = []
-        for msg in prompt_messages:
-            chunks.append(str(msg.get("content", "")) if isinstance(msg, dict) else str(msg))
-        return "\n\n".join(chunks).strip() + "\n\nAnswer:"
-    return str(prompt_messages)
-
-
 def extract_user_question(prompt) -> str:
     if isinstance(prompt, list):
         for msg in reversed(prompt):

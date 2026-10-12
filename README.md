@@ -32,7 +32,7 @@ estimators reported in the appendix.
 | `evaluation/` | `eval_semantic.py` (sampling-based) and `eval_verbalized.py` (verbalized-confidence baselines) |
 | `configs/` | YAML defaults, split into `methods/`, `models/`, `datasets/`, plus `judge.yaml` |
 | `analysis/` | Post-hoc estimators and aggregation rules reported in the appendix |
-| `scripts/` | `train.sh`, `eval.sh`, `serve/serve_judge.sh`, and result collection |
+| `scripts/` | `serve/serve_judge.sh`, re-judging, and result collection |
 | `rd_util/` | Utilities for the Rewarding-Doubt baseline, kept close to upstream |
 
 # Getting started
@@ -96,8 +96,10 @@ then append to any command:
 `reasoning_effort` and the larger `max_tokens` are what gpt-oss-20b needs to reason
 before answering; a non-reasoning model rejects the first and does not need the second.
 
-Token F1 can stand in for the judge entirely (`--set judge.backend=f1`), which removes
-the dependency at some cost in reward quality.
+Token F1 can stand in for the rollout-vs-rollout equivalence call
+(`--set judge.equivalence=f1`), which cuts the judge's cost by the 88% of calls that are
+pairwise; correctness still goes to the model. That is the CSR-F1 configuration the paper
+reports, with `judge.f1_threshold` 0.50 for Llama and Mistral and 0.80 for Qwen.
 
 ## 3. Prepare Datasets
 
@@ -121,16 +123,19 @@ it, and none of these directories are tracked:
 
 ## 4. Train
 
-```bash
-bash scripts/train.sh <METHOD> <model> <GPU> [--set key=value ...]
-```
+One entry point per method; the environment is yours to set.
 
 ```bash
-bash scripts/train.sh CSR qwen 0            # CSR, Qwen2.5-7B, GPU 0
+export CUDA_VISIBLE_DEVICES=0
+export OPENAI_API_KEY=EMPTY           # a local vLLM judge ignores it, the trainer requires it
+export HF_HOME=/path/to/hf/cache      # optional; otherwise ~/.cache/huggingface
 
-conda activate csr-rd                       # RD pins the older stack
-bash scripts/train.sh RD llama 1
+python train/train_CSR.py --model qwen --dataset hotpot [--set key=value ...]
 ```
+
+`train_RLVR.py`, `train_RLCR.py` and `train_RD.py` take the same arguments. RD pins the
+older stack, so activate the environment built from `environment-rd.yml` for it and the
+unsloth one for the other three.
 
 The two settings that matter most for CSR are the calibration weight and the weight on
 binary correctness:
@@ -140,11 +145,12 @@ binary correctness:
   so it hits both endpoints exactly).
 * **`corr_w`** — 1.0 throughout the paper.
 
+The defaults ramp 0.8 → 1.2 on a sigmoid; to hold the weight constant instead:
+
 ```bash
-bash scripts/train.sh CSR qwen 0 \
-  --set method.train.cali_w_start=0.8 \
-  --set method.train.cali_w_end=1.2 \
-  --set method.train.cali_w_schedule=sigmoid
+python train/train_CSR.py --model qwen --dataset hotpot \
+  --set method.train.cali_w_start=1.0 \
+  --set method.train.cali_w_end=1.0
 ```
 
 Higher is not better: `configs/methods/csr.yaml` records where the policy fragments and
@@ -152,25 +158,35 @@ where it collapses onto a single answer.
 
 ## 5. Evaluate
 
+Two entry points, picked by method: `evaluation/eval_semantic.py` reads confidence off
+the rollout spread for **Base, RLVR and CSR**, and `evaluation/eval_verbalized.py` parses
+the confidence token for **RD and RLCR**.
+
 ```bash
-bash scripts/eval.sh <METHOD> <model> [checkpoint] [--set key=value ...]
+export CUDA_VISIBLE_DEVICES=0
+export OPENAI_API_KEY=...
+
+python evaluation/eval_semantic.py --method Base --model qwen --dataset hotpot
+python evaluation/eval_semantic.py --method CSR --model qwen --dataset hotpot \
+  --ckpt ckpt/CSR/<run>/checkpoint-2500
 ```
 
+Loop over the four datasets in your own shell to fill a table row:
+
 ```bash
-bash scripts/eval.sh Base qwen                              # the frozen model
-bash scripts/eval.sh CSR  qwen ckpt/CSR/<run>/checkpoint-2500
+for ds in hotpot trivia msmarco nq_open; do
+  python evaluation/eval_semantic.py --method CSR --model qwen --dataset "$ds" --ckpt "$CKPT"
+done
 ```
 
-`eval.sh` picks the right entry point from the method: `evaluation/eval_semantic.py`
-reads confidence off the rollout spread for Base, RLVR and CSR, and
-`evaluation/eval_verbalized.py` parses the confidence token for RD and RLCR. Each run
-writes `results/<run>/{config.yaml,results.json,results.csv}`.
+Each run writes `results/<run>/{config.yaml,results.json,results.csv}`. Pass `--exp-name`
+to keep two variants of the same checkpoint from sharing a directory.
 
-**Confidence from token F1 instead of the judge.** Replaces every equivalence call with
-token overlap, which removes the judge dependency:
+**Confidence from token F1 instead of the judge.** Re-clusters finished runs with token
+overlap in place of the pairwise equivalence calls, at the thresholds the paper reports
+(0.50 Llama/Mistral, 0.80 Qwen), writing each result to a separate `*_semf1_k16` run:
 
 ```bash
-bash scripts/eval.sh CSR qwen <ckpt> --set judge.backend=f1
 python scripts/f1_judge_eval.py              # the thresholds the paper reports
 ```
 
@@ -181,8 +197,7 @@ no estimator here is ever used during training:
 | --- | --- |
 | `analysis/estimators.py` | Semantic Density and SIMBA-UQ's Bayesian aggregation |
 | `analysis/aggregation.py` | SIMBA-UQ's arithmetic aggregation and the `clf-pairs+gen` classifier |
-| `analysis/simba.py` | The same classifier under SIMBA-UQ's own training protocol |
-| `analysis/selective.py` | Selective prediction (AURAC, AUGRC) and inference cost |
+| `analysis/selective.py` | Selective prediction (AURAC, AUGRC) |
 | `scripts/rejudge.py` | Re-scoring a finished run with a different judge |
 
 Semantic Density and both SIMBA rules read one extra per-rollout feature, the mean token
@@ -218,12 +233,12 @@ Three things worth knowing before changing anything:
   prompts, so prompts per step is `per_device_train_batch_size * grad_accum /
   num_generations` — 4 at the defaults, hence 2500 steps for one epoch over 10k prompts.
 
-The shipped defaults follow the current revision of the paper: `beta` 0.01, a fixed
-calibration weight `cali_w` 1.0, training K=8 and evaluation K=16. Earlier preprint
-versions reported `beta` 0.1 and a raw, un-normalized BCE with a 0.1 → 0.2 weight
-range; the reward here is the affine-normalized form (`csr/rewards.py`, scale
-`DELTA_CE` = 13.8155), under which a raw weight `w` corresponds to `w * 13.8155`, so
-that 0.1 → 0.2 range is 1.3816 → 2.7631 in these units.
+The shipped defaults are `beta` 0.01, a sigmoid calibration weight from `cali_w`
+0.8 to 1.2, training K=8 and evaluation K=16. Earlier preprint versions reported
+`beta` 0.1 and a raw, un-normalized BCE with a 0.1 → 0.2 weight range; the reward
+here is the affine-normalized form (`csr/rewards.py`, scale `DELTA_CE` = 13.8155),
+under which a raw weight `w` corresponds to `w * 13.8155`, so that 0.1 → 0.2 range
+is 1.3816 → 2.7631 in these units.
 
 ---
 

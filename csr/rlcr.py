@@ -30,6 +30,14 @@ def exact_match_score(prediction: str, ground_truth: str) -> float:
     return float(normalize_answer(prediction) == normalize_answer(ground_truth))
 
 
+def exact_match_any(prediction: str, gold) -> float:
+    """``exact_match_score`` against a gold that may be a list of aliases; a list
+    stringified whole would never match. Mirrors rd_util/EvaluationMetrics.py."""
+    if isinstance(gold, (list, tuple)):
+        return max((exact_match_score(prediction, g) for g in gold), default=0.0)
+    return exact_match_score(prediction, gold)
+
+
 def completion_text(completion) -> str:
     if isinstance(completion, list) and completion and isinstance(completion[0], dict):
         text = completion[0].get("content", "")
@@ -84,8 +92,8 @@ class RLCRRewards:
             if ok == 0.0 or src != "hotpot":
                 rewards.append(0.0)
                 continue
-            rewards.append(exact_match_score(last_tag_text(completion_text(completion), "answer"),
-                                             gold))
+            rewards.append(exact_match_any(last_tag_text(completion_text(completion), "answer"),
+                                           gold))
         return rewards
 
     def brier_reward(self, completions, answer, source=None, **_) -> list[float]:

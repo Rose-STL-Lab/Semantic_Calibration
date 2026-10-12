@@ -33,8 +33,7 @@ def _prepare_tokenizer(tokenizer):
     return tokenizer
 
 
-def load_policy(cfg, max_seq_length: int, gpu_memory_utilization: float | None = None,
-                fast_inference: bool = True, gradient_checkpointing="unsloth"):
+def load_policy(cfg, max_seq_length: int, gpu_memory_utilization: float | None = None):
     """Base model + freshly initialized LoRA adapter, ready for GRPO."""
     model_cfg = cfg["model"]
     lora = model_cfg["lora"]
@@ -44,7 +43,7 @@ def load_policy(cfg, max_seq_length: int, gpu_memory_utilization: float | None =
         model_name=model_cfg["hf_id"],
         max_seq_length=int(max_seq_length),
         load_in_4bit=bool(model_cfg.get("load_in_4bit", True)),
-        fast_inference=fast_inference,
+        fast_inference=True,
         max_lora_rank=int(lora["rank"]),
         use_exact_model_name=bool(model_cfg.get("use_exact_model_name", True)),
         gpu_memory_utilization=float(
@@ -57,14 +56,13 @@ def load_policy(cfg, max_seq_length: int, gpu_memory_utilization: float | None =
 
     model = FastLanguageModel.get_peft_model(
         model,
-        use_gradient_checkpointing=gradient_checkpointing,
+        use_gradient_checkpointing="unsloth",
         **_lora_kwargs(cfg),
     )
     return model, tokenizer
 
 
-def load_for_eval(cfg, max_seq_length: int, checkpoint: str | None = None,
-                  fast_inference: bool = True):
+def load_for_eval(cfg, max_seq_length: int, checkpoint: str | None = None):
     """Base model for evaluation; returns ``(model, tokenizer, lora_request)``, where
     lora_request routes the vLLM fast path through ``checkpoint`` (None for a base run)."""
     model_cfg = cfg["model"]
@@ -75,7 +73,7 @@ def load_for_eval(cfg, max_seq_length: int, checkpoint: str | None = None,
         model_name=model_cfg["hf_id"],
         max_seq_length=int(max_seq_length),
         load_in_4bit=bool(model_cfg.get("load_in_4bit", True)),
-        fast_inference=fast_inference,
+        fast_inference=True,
         max_lora_rank=int(lora["rank"]),
         use_exact_model_name=bool(model_cfg.get("use_exact_model_name", True)),
         gpu_memory_utilization=float(model_cfg.get("gpu_memory_utilization", 0.7)),

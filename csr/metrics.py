@@ -57,12 +57,11 @@ def safe_kendall(x: Sequence[float], y: Sequence[float]) -> float | None:
     return None if (r is None or np.isnan(r)) else float(r)
 
 
-def safe_auroc(accuracies: Sequence[float], confidences: Sequence[float],
-               threshold: float = 0.5) -> float | None:
+def safe_auroc(accuracies: Sequence[float], confidences: Sequence[float]) -> float | None:
     """AUROC of confidence as a score for "this question was answered correctly"."""
     y_true = np.asarray(accuracies, dtype=float)
     if not np.all((y_true == 0) | (y_true == 1)):
-        y_true = (y_true >= threshold).astype(int)
+        y_true = (y_true >= 0.5).astype(int)
     else:
         y_true = y_true.astype(int)
     if len(y_true) == 0 or y_true.min() == y_true.max():

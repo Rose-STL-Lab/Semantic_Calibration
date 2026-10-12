@@ -8,7 +8,7 @@ from functools import partial
 
 from datasets import load_dataset
 
-from .text import clean_unicode_text, normalize_answer
+from .parsing import clean_unicode_text, normalize_answer
 
 
 def _messages(system_prompt: str, question: str, user_template: str | None = None) -> list[dict]:
@@ -162,8 +162,7 @@ def _resolve_split(raw, requested: str) -> str:
     return next(iter(raw.keys()))
 
 
-def load_split(cfg, split: str = "eval", system_prompt: str | None = None,
-               size: int | None = None):
+def load_split(cfg, split: str = "eval", size: int | None = None):
     """Load one split of the configured dataset in the unified schema.
 
     ``split`` is "train" or "eval"; sizes default to the config's
@@ -175,8 +174,7 @@ def load_split(cfg, split: str = "eval", system_prompt: str | None = None,
         raise ValueError(f"no field mapping for dataset {name!r}")
 
     method_cfg = cfg.get("method", {})
-    system_prompt = system_prompt if system_prompt is not None \
-        else method_cfg.get("system_prompt", "")
+    system_prompt = method_cfg.get("system_prompt", "")
     user_template = method_cfg.get("user_template")
 
     # dataset may override the method's system prompt; RD/RLCR keep their own format instructions

@@ -17,16 +17,6 @@ MODELS = ["llama", "qwen", "mistral", "qwen14b"]
 DATASETS = ["hotpot", "hotpot_context", "trivia", "msmarco", "nq_open"]
 
 
-class Config(dict):
-    """A dict that also answers ``cfg.model.hf_id``."""
-
-    def __getattr__(self, item: str) -> Any:
-        try:
-            value = self[item]
-        except KeyError as exc:
-            raise AttributeError(item) from exc
-        return Config(value) if isinstance(value, dict) else value
-
 def _read_yaml(path: str) -> dict:
     if not os.path.exists(path):
         raise FileNotFoundError(f"config file not found: {path}")
@@ -82,9 +72,8 @@ def load_config(
     model: str,
     dataset: str,
     overrides: Iterable[str] = (),
-    config_root: str | None = None,
-) -> Config:
-    root = config_root or CONFIG_ROOT
+) -> dict:
+    root = CONFIG_ROOT
     if model not in MODELS:
         raise ValueError(f"unknown model {model!r}; choose from {MODELS}")
     if dataset not in DATASETS:
@@ -109,10 +98,10 @@ def load_config(
         if isinstance(value, str) and not os.path.isabs(value):
             cfg["paths"][key] = os.path.join(REPO_ROOT, value)
 
-    return Config(cfg)
+    return cfg
 
 
-def checkpoint_dir(cfg: Config, exp_name: str | None = None) -> str:
+def checkpoint_dir(cfg: dict, exp_name: str | None = None) -> str:
     """``ckpt/<METHOD>/<model.ckpt_name>`` (ckpt_name is llama8b/qwen7b/mistral7b, not the config key).
 
     ``exp_name`` replaces the model segment so two hyperparameter variants do not overwrite each other.
@@ -121,7 +110,7 @@ def checkpoint_dir(cfg: Config, exp_name: str | None = None) -> str:
     return os.path.join(cfg["paths"]["ckpt"], str(cfg["method"]["name"]), str(leaf))
 
 
-def default_exp_name(cfg: Config, checkpoint: str | None = None) -> str:
+def default_exp_name(cfg: dict, checkpoint: str | None = None) -> str:
     """Fallback name (``CSR_qwen_trivia_checkpoint-2500``) when ``--exp-name`` is absent;
     ``results/`` dirs are named explicitly and the two conventions are not interchangeable.
     """
@@ -154,20 +143,6 @@ def add_common_args(parser: argparse.ArgumentParser, *, with_method: bool = True
                              "(e.g. --set method.eval.num_rollouts=16)")
 
 
-def setup_env(cfg: Config) -> None:
-    """Point HuggingFace at the repo-local cache and mute vLLM."""
-    hf_cache = cfg["paths"]["hf_cache"]
-    os.makedirs(hf_cache, exist_ok=True)
-    os.environ.setdefault("HF_HOME", hf_cache)
-    os.environ.setdefault("HF_HUB_CACHE", os.path.join(hf_cache, "hub"))
-    os.environ.setdefault("HF_DATASETS_CACHE", os.path.join(hf_cache, "datasets"))
-    os.environ.setdefault("TRANSFORMERS_CACHE", os.path.join(hf_cache, "hub"))
-    if cfg.get("quiet_vllm", True):
-        os.environ.setdefault("VLLM_DISABLE_LOGGING", "1")
-        os.environ.setdefault("VLLM_LOGGING_LEVEL", "ERROR")
-        os.environ.setdefault("VLLM_NO_USAGE_STATS", "1")
-
-
 def seed_everything(seed: int) -> None:
     import random
 
@@ -184,7 +159,7 @@ def seed_everything(seed: int) -> None:
         pass
 
 
-def dump_config(cfg: Config, path: str) -> None:
+def dump_config(cfg: dict, path: str) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         yaml.safe_dump(dict(cfg), fh, sort_keys=False, allow_unicode=True, width=100)

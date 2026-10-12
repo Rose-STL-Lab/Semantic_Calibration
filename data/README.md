@@ -1,11 +1,12 @@
 # data/
 
-Working directory for datasets. Nothing here is tracked by git.
+Working directory for datasets. Nothing here is tracked by git except this file.
 
-* `hf_cache/` — HuggingFace cache (`HF_HOME`, hub, datasets). All four corpora
-  download themselves on first use; set `paths.hf_cache` in
-  `configs/default.yaml` (or `--set paths.hf_cache=/somewhere/else`) to point
-  elsewhere, for instance at a shared cache.
+The four corpora download themselves on first use through the `datasets` API and
+need no manual download -- see the table in the top-level README. They land in
+whatever HuggingFace cache the environment points at, so set `HF_HOME` yourself
+if you want them somewhere other than `~/.cache/huggingface`:
 
-The datasets themselves are pulled through the `datasets` API and need no
-manual download — see the table in the top-level README.
+```bash
+export HF_HOME=/path/to/a/shared/cache
+```

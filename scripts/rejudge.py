@@ -1,9 +1,14 @@
 #!/usr/bin/env python
 """Re-score an existing RD / RLCR evaluation with a different judge, without regenerating.
 
+RD and RLCR only: those records carry one greedy answer with a top-level ``correct``
+label. The sampling-based methods store per-rollout labels instead, so they have no
+such field and must be re-judged by rerunning evaluation/eval_semantic.py.
+
 Only ``correct``/``accuracy`` are recomputed (same rule as eval_verbalized.py:
 no extracted answer -> 0, no judge call); answers, confidences and format flags
-are copied from the source. The judge comes entirely from ``--set judge.*``.
+are copied from the source. The judge comes entirely from ``--set judge.*``. The new
+run records ``rejudged_from`` and ``agreement_with_source_labels`` in its summary.
 
     python scripts/rejudge.py --method RD --model qwen --dataset hotpot --src <results/ dir> \
         --exp-name <new run dir> --set judge.base_url=http://127.0.0.1:8310/v1
@@ -27,6 +32,9 @@ def main():
     parser.add_argument("--src", required=True, help="source results/<exp> directory name")
     parser.add_argument("--chunk", type=int, default=200, help="questions per judge batch")
     args = parser.parse_args()
+    if args.method not in ("RD", "RLCR"):
+        raise SystemExit(f"--method {args.method} stores per-rollout labels, not a top-level "
+                         f"'correct'; re-judge it by rerunning evaluation/eval_semantic.py")
     if not args.exp_name:
         raise SystemExit("--exp-name is required (never overwrite the source run)")
     if args.exp_name == args.src:

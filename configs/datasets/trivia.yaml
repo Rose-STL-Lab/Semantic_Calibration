@@ -1,7 +1,5 @@
 dataset:
   name: trivia
-  display_name: TriviaQA
-  role: out-of-distribution
   hf:
     path: mandarjoshi/trivia_qa
     config: rc.web.nocontext

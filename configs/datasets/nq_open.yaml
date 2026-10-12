@@ -1,7 +1,5 @@
 dataset:
   name: nq_open
-  display_name: NQ-Open
-  role: out-of-distribution
   hf:
     path: google-research-datasets/nq_open
     config: null

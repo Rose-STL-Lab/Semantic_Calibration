@@ -1,7 +1,5 @@
 dataset:
   name: hotpot_context
-  display_name: HotpotQA (with context)
-  role: in-distribution          # trained on; also the ID evaluation set
 
   # same split as `hotpot`; only the prompt differs -- it carries the distractor paragraphs
   hf:
@@ -13,16 +11,12 @@ dataset:
   eval_size: 1000
   correctness_prompt: judge
 
-  # prepend each paragraph as "Title: <t>\n<sentences>", blank-line separated, then "Question: <q>"
-  include_context: true
-
-  # answer-only methods (Base, RLVR, CSR) only; RD and RLCR keep their own format instructions
+  # csr/data.py's _hotpot_context builder prepends each paragraph as
+  # "Title: <t>\n<sentences>", blank-line separated, then "Question: <q>".
+  # Answer-only methods (Base, RLVR, CSR) only; RD and RLCR keep their own layout.
   system_prompt:
     default: |-
       Provide a concise and direct answer to the question. Use the provided context and reason step-by-step. End with 'Final answer: <answer>'.
-
-  # the answer is whatever follows the last marker; RD and RLCR have their own parsers
-  answer_marker: "Final answer:"
 
 # The distractor context makes the prompt ~1500 tokens; the 1024-token default cannot hold it.
 model:

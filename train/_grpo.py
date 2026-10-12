@@ -9,7 +9,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from csr.config import (add_common_args, checkpoint_dir, load_config,
-                        seed_everything, setup_env)
+                        seed_everything)
 
 
 def parse_args(method: str, description: str) -> argparse.Namespace:
@@ -26,7 +26,6 @@ def parse_args(method: str, description: str) -> argparse.Namespace:
 
 def run(args: argparse.Namespace) -> None:
     cfg = load_config(args.method, args.model, args.dataset, args.overrides)
-    setup_env(cfg)
     seed = int(cfg["seed"])
     seed_everything(seed)
 

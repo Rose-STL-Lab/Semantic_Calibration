@@ -1,6 +1,5 @@
 model:
   name: qwen14b
-  display_name: Qwen3-14B
 
   # checkpoints live in ckpt/<METHOD>/<ckpt_name>/
   ckpt_name: qwen14b

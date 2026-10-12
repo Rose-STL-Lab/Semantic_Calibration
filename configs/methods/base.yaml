@@ -1,7 +1,5 @@
 method:
   name: Base
-  kind: semantic            # semantic | verbalized
-  trainable: false
   system_prompt: |-
     Provide a concise and direct answer to the question. Avoid unnecessary explanations or additional text.
   eval:
