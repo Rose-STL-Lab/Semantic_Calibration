@@ -33,7 +33,7 @@ MODELS = ["llama8b", "qwen7b", "mistral7b"]   # results/ and ckpt/ share these n
 
 
 def load_hf_policy(cfg, adapter: str | None, load_in_4bit: bool):
-    """The policy as trained and evaluated -- 4-bit NF4 with double quant -- plus its LoRA."""
+    # 4-bit NF4 with double quant, as trained and evaluated, plus its LoRA
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
@@ -58,7 +58,7 @@ def load_hf_policy(cfg, adapter: str | None, load_in_4bit: bool):
 
 
 def score_batch(model, tokenizer, pairs, device="cuda:0"):
-    """Mean answer log-prob for a list of (prompt_text, answer_text)."""
+    # mean answer log-prob for a list of (prompt_text, answer_text)
     import torch
     import torch.nn.functional as F
 

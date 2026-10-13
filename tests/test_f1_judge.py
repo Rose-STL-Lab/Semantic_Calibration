@@ -1,8 +1,6 @@
 #!/usr/bin/env python
-"""Token-F1 equivalence (csr/f1_judge.py); needs no GPU, API key or judge server.
-
-    python tests/test_f1_judge.py
-"""
+# Token-F1 equivalence (csr/f1_judge.py); needs no GPU, API key or judge server.
+# python tests/test_f1_judge.py
 
 from __future__ import annotations
 
@@ -133,11 +131,9 @@ def test_f1_values():
 
 
 def make_equivalence_judge(threshold=0.5):
-    """The CSR-F1 configuration: token F1 for rollout-rollout equivalence only.
-
-    The ``llm`` slot is a bare object: reclustering touches nothing but
-    ``symmetric_batched``, which is exactly what scripts/f1_judge_eval.py relies on.
-    """
+    # the CSR-F1 configuration: token F1 for rollout-rollout equivalence only. The
+    # llm slot is a bare object -- reclustering touches nothing but
+    # symmetric_batched, which is what scripts/f1_judge_eval.py relies on.
     return F1EquivalenceJudge(object(), {"judge": {"f1_threshold": threshold}},
                               chat_end_markers=())
 
@@ -150,7 +146,7 @@ def test_equivalence_threshold_is_inclusive():
           str(exact_half))
     j = make_equivalence_judge(0.5)
     labels, unparsed, missing = j.symmetric_batched(["red cat"], ["red dog"], ["q"])
-    # F1Judge uses `>` like RD; F1EquivalenceJudge uses `>=`, as the CSR-F1 scripts do.
+    # F1EquivalenceJudge uses `>=`, as the CSR-F1 scripts do
     check("F1 == threshold counts as EQUIVALENT (`>=`)", labels == [1], str(labels))
     check("equivalence verdicts are never unparsable", unparsed == 0 and missing == [])
 
@@ -178,7 +174,7 @@ def test_equivalence_stats_and_delegation():
     check("one pair matched, one did not",
           stats["parsed_yes"] == 1 and stats["parsed_no"] == 1, str(stats))
     check("f1 equivalence never reports unparsed", stats["unparsed"] == 0, str(stats))
-    # correctness is NOT replaced: it is delegated to the wrapped LLM judge.
+    # correctness is not replaced, just delegated to the wrapped LLM judge
     check("correctness is delegated, not overridden",
           "symmetric_batched" in vars(type(j))
           and "correctness_batched" not in vars(type(j)))

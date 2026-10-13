@@ -1,6 +1,6 @@
-"""Answer extraction and canonicalization for everything a model emits; the only
-model-dependent piece is the chat end-of-turn markers from ``configs/models/<model>.yaml``.
-"""
+# Answer extraction and canonicalization for everything a model emits; the only
+# model-dependent piece is the chat end-of-turn markers from
+# configs/models/<model>.yaml.
 
 from __future__ import annotations
 
@@ -15,13 +15,12 @@ _CANON_PREFIX_RE = re.compile(
 )
 _CANON_TAIL_RE = re.compile(r"\s*(explanation\s*:.*)$", flags=re.I | re.S)
 
-# defence against prompt/format injection from model output and dataset text reaching the judge
+# against prompt/format injection from model output and dataset text
 _CHAT_TEMPLATE_TOKEN_RE = re.compile(r"<\|[^|>\s]{1,80}\|>")
 _JUDGE_OUTPUT_MIMIC_RE = re.compile(r"\bcorrect\s*:\s*(?:yes|no)\b", flags=re.I)
 
 
 def strip_chat_markers(text: str, markers: Sequence[str] = ()) -> str:
-    """Remove trailing end-of-turn markers left by a chat template (markers are per model)."""
     out = str(text or "").strip()
     if not markers:
         return out
@@ -35,7 +34,7 @@ def strip_chat_markers(text: str, markers: Sequence[str] = ()) -> str:
 
 
 def _completion_to_str(completion) -> str:
-    """Accept a plain string or the chat-style list TRL hands reward functions."""
+    # TRL passes a plain string or a chat-style list
     if isinstance(completion, list) and completion and isinstance(completion[0], dict) \
             and "content" in completion[0]:
         return completion[0]["content"]
@@ -47,9 +46,7 @@ def _completion_to_str(completion) -> str:
 
 
 def clean_generation(completion, chat_end_markers: Sequence[str] = ()) -> str:
-    """Strip chat markers and transcript artefacts, leaving "Answer:" intact for the
-    verbalized parsers, which split on it themselves.
-    """
+    # leaves "Answer:" intact; the verbalized parsers split on it themselves
     text = strip_chat_markers(_completion_to_str(completion), chat_end_markers)
 
     cleaned_lines = []
@@ -65,12 +62,10 @@ def clean_generation(completion, chat_end_markers: Sequence[str] = ()) -> str:
     return "\n".join(x for x in cleaned_lines if x).strip()
 
 
-def extract_completion_text(completion, chat_end_markers: Sequence[str] = ()) -> str:
-    """The answer string we score: everything after the last "Answer:".
-
-    "Final answer:" (the context-grounded split's closing marker) wins when present; the
-    lower-case "a" keeps the two from colliding, so closed-book behaviour is unchanged.
-    """
+def strip_prompt_prefix(completion, chat_end_markers: Sequence[str] = ()) -> str:
+    # everything after the last "Answer:". "Final answer:" (the context split's
+    # closing marker) wins when present; the lower-case "a" keeps the two from
+    # colliding, so closed-book behaviour is unchanged.
     text = clean_generation(completion, chat_end_markers)
     if "Final answer:" in text:
         return text.split("Final answer:")[-1].strip()
@@ -80,13 +75,13 @@ def extract_completion_text(completion, chat_end_markers: Sequence[str] = ()) ->
 
 
 def normalize_for_equiv(text, chat_end_markers: Sequence[str] = (), max_chars: int = 2000) -> str:
-    t = extract_completion_text(text, chat_end_markers)
+    t = strip_prompt_prefix(text, chat_end_markers)
     t = re.sub(r"\s+", " ", t).strip()
     return t[:max_chars]
 
 
 def canonicalize_answer(text, chat_end_markers: Sequence[str] = ()) -> str:
-    """Aggressive normalization used for the judge's cache key and shortcut."""
+    # the judge's cache key and exact-match shortcut
     t = normalize_for_equiv(text, chat_end_markers)
     t = _CANON_TAIL_RE.sub("", t).strip()
     t = _CANON_PREFIX_RE.sub("", t).strip()
@@ -95,7 +90,6 @@ def canonicalize_answer(text, chat_end_markers: Sequence[str] = ()) -> str:
 
 
 def sanitize_for_judge(text, max_chars: int = 1000) -> str:
-    """Neutralize text before it is interpolated into the judge's prompt."""
     t = "" if text is None else str(text)
     t = _CHAT_TEMPLATE_TOKEN_RE.sub(" ", t)
     t = _JUDGE_OUTPUT_MIMIC_RE.sub("[redacted]", t)
@@ -104,7 +98,7 @@ def sanitize_for_judge(text, max_chars: int = 1000) -> str:
 
 
 def clean_unicode_text(text) -> str:
-    """NFKC + zero-width / exotic-space removal (MSMARCO and NQ-Open need it)."""
+    # NFKC + zero-width / exotic-space removal (MSMARCO and NQ-Open need it)
     t = unicodedata.normalize("NFKC", str(text or ""))
     t = re.sub("[\u200b\u200c\u200d\ufeff]", "", t)                       # zero-width
     t = re.sub("[\u00a0\u2000-\u200a\u202f\u205f\u3000]", " ", t)       # exotic spaces
@@ -113,7 +107,7 @@ def clean_unicode_text(text) -> str:
 
 
 def normalize_answer(s) -> str:
-    """SQuAD-style normalization, used for exact match against aliases."""
+    # SQuAD-style, for exact match against aliases
     text = str(s or "").lower().replace("_", " ")
     exclude = set(string.punctuation + "‘’´`")
     text = "".join(ch if ch not in exclude else " " for ch in text)
@@ -135,7 +129,6 @@ _RLCR_CONFIDENCE_RE = re.compile(r"<confidence>\s*(.*?)\s*</confidence>", flags=
 
 
 def _separator_class(separators: Sequence[str]) -> str:
-    """Regex fragment matching any configured Answer/Confidence separator."""
     chars = "".join(re.escape(s) for s in separators if s and s != "\n")
     newline = r"|\r?\n" if any(s == "\n" for s in separators) else ""
     if not chars and not newline:
@@ -145,15 +138,13 @@ def _separator_class(separators: Sequence[str]) -> str:
 
 def parse_rd_output(text, separators: Sequence[str] = (",",),
                     chat_end_markers: Sequence[str] = (), scale: float = 10.0):
-    """Parse RD's ``Answer: <a>, Confidence: <0-10>`` format.
-
-    Returns ``(extracted_answer | None, confidence in [0,1] | None, raw_conf)``.
-    """
+    # Answer: <a>, Confidence: <0-10>
+    # -> (answer | None, confidence in [0,1] | None, raw_conf)
     raw = strip_chat_markers(_completion_to_str(text), chat_end_markers)
     sep = _separator_class(separators)
 
-    # NB: clean_generation, not extract_completion_text -- the "Answer:" marker
-    # must still be present for the Answer/Confidence pair to be found.
+    # clean_generation, not strip_prompt_prefix: the "Answer:" marker must survive
+    # for the Answer/Confidence pair to be found
     body = clean_generation(raw, chat_end_markers)
     match = re.search(
         rf"Answer:\s*(.*?)(?:\s*(?:{sep})?\s*Confidence:\s*[-+]?\d+(?:\.\d+)?|$)",
@@ -177,7 +168,7 @@ def parse_rd_output(text, separators: Sequence[str] = (",",),
 
 
 def parse_rlcr_output(text, chat_end_markers: Sequence[str] = (), scale: float = 1.0):
-    """Parse RLCR's ``<answer>…</answer> … <confidence>…</confidence>`` format."""
+    # <answer>...</answer> ... <confidence>...</confidence>
     raw = strip_chat_markers(_completion_to_str(text), chat_end_markers)
 
     answers = _RLCR_ANSWER_RE.findall(raw)

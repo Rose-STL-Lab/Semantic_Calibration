@@ -45,7 +45,7 @@ def jaccard(a: set[str], b: set[str]) -> float:
 
 
 def fit_beta(x: np.ndarray) -> tuple[float, float]:
-    """Method-of-moments Beta fit, floored so a degenerate fold stays finite."""
+    # method of moments, floored so a degenerate fold stays finite
     x = np.clip(np.asarray(x, float), EPS, 1 - EPS)
     mean, var = float(x.mean()), max(float(x.var()), 1e-6)
     conc = max(mean * (1 - mean) / var - 1.0, 1e-3)
@@ -53,7 +53,7 @@ def fit_beta(x: np.ndarray) -> tuple[float, float]:
 
 
 def load_run(exp: str, k: int) -> list[dict]:
-    """Records of one finished run, truncated to the first k rollouts."""
+    # truncated to the first k rollouts
     payload = json.loads((RESULTS / exp / "results.json").read_text())
     if payload.get("status") != "final":
         raise ValueError(f"{exp}: status={payload.get('status')!r}, not final")
@@ -70,14 +70,10 @@ def load_run(exp: str, k: int) -> list[dict]:
 
 
 def semantic_density(records: list[dict]) -> np.ndarray:
-    """Semantic density per question, references weighted by exp(mean token log-prob).
-
-    Deviates from Qiu et al.: the kernel is the 0/1 same-semantic-cluster indicator,
-    not DeBERTa-MNLI 1-(p_contra + 0.5 p_neutral), and the references are the K
-    temperature rollouts, not diverse beam search (Appendix D.1).  With no
-    log-probability file the weights go uniform -- the unweighted variant, whereas
-    the published table is the weighted one.
-    """
+    # deviates from Qiu et al.: kernel is the 0/1 same-cluster indicator, not
+    # DeBERTa-MNLI 1-(p_contra + 0.5 p_neutral); references are the K temperature
+    # rollouts, not diverse beam search (Appendix D.1). No log-prob file -> uniform
+    # weights, i.e. the unweighted variant; the published table is weighted.
     out = []
     for rec in records:
         ids = rec["cluster"]
@@ -96,7 +92,7 @@ def semantic_density(records: list[dict]) -> np.ndarray:
         if total <= 0:
             out.append(1.0)
             continue
-        # Each rollout in turn is the scored response; the reference set includes it.
+        # each rollout in turn is the scored response; the reference set includes it
         out.append(float(np.mean([
             sum(w[i] for i in ref if ids[i] == ids[t]) / total for t in range(k)
         ])))
@@ -104,7 +100,7 @@ def semantic_density(records: list[dict]) -> np.ndarray:
 
 
 def bayes_beta(records: list[dict]) -> np.ndarray:
-    """Out-of-fold SIMBA-UQ posterior, averaged over each question's rollouts."""
+    # out-of-fold SIMBA-UQ posterior, averaged over each question's rollouts
     sims, labels, groups = [], [], []
     for qi, rec in enumerate(records):
         tsets = [tokens(a) for a in rec["answers"]]
@@ -120,7 +116,7 @@ def bayes_beta(records: list[dict]) -> np.ndarray:
 
     conf = np.zeros(len(labels), dtype=float)
     if len(set(labels.tolist())) < 2:
-        # A dataset where every rollout is correct (or none) carries no signal.
+        # all-correct or all-wrong carries no signal
         conf[:] = float(labels.mean())
     else:
         for train, test in GroupKFold(n_splits=N_FOLDS).split(sims, labels, groups):
@@ -143,7 +139,7 @@ LOGPROBS_NAME = "logprobs_hf.json"   # the transformers scorer; see aggregation
 
 
 def attach_logprobs(exp: str, records: list[dict], k: int) -> bool:
-    """Add each rollout's mean token log-probability, which SemDens weights by."""
+    # each rollout's mean token log-prob; SemDens weights by it
     path = RESULTS / exp / LOGPROBS_NAME
     if not path.exists():
         print(f"[warn] {exp}: no {LOGPROBS_NAME}, SemDens falls back to uniform weights",
@@ -159,7 +155,7 @@ ESTIMATORS = {"SemDens": semantic_density, "bayes-beta": bayes_beta}
 
 
 def score(exp: str, k: int) -> dict[str, tuple[float, float]]:
-    """{estimator: (ECE, AUROC)} for one run."""
+    # {estimator: (ECE, AUROC)}
     records = load_run(exp, k)
     attach_logprobs(exp, records, k)
     acc = np.asarray([np.mean(r["correct"]) for r in records], dtype=float)
@@ -173,7 +169,7 @@ def score(exp: str, k: int) -> dict[str, tuple[float, float]]:
 
 
 def collect(k: int) -> dict:
-    """{(estimator, model, method): {dataset: (ece, auroc), 'avg': ...}}"""
+    # {(estimator, model, method): {dataset: (ece, auroc), 'avg': ...}}
     table = {}
     for model in MODELS:
         for method, pattern in SEMANTIC_TEMPLATES.items():

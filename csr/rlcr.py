@@ -1,8 +1,6 @@
-"""RLCR baseline: reward functions and its HotpotQA prompt construction.
-
-RLCR emits <think>/<answer>/<analysis>/<confidence>, is scored by exact match
-rather than the LLM judge, and takes the supporting paragraphs in the prompt.
-"""
+# RLCR baseline: reward functions and its HotpotQA prompt construction.
+# RLCR emits <think>/<answer>/<analysis>/<confidence>, is scored by exact match
+# rather than the LLM judge, and takes the supporting paragraphs in the prompt.
 
 from __future__ import annotations
 
@@ -31,8 +29,8 @@ def exact_match_score(prediction: str, ground_truth: str) -> float:
 
 
 def exact_match_any(prediction: str, gold) -> float:
-    """``exact_match_score`` against a gold that may be a list of aliases; a list
-    stringified whole would never match. Mirrors rd_util/EvaluationMetrics.py."""
+    # gold may be a list of aliases; stringified whole it would never match.
+    # Mirrors rd_util/EvaluationMetrics.py.
     if isinstance(gold, (list, tuple)):
         return max((exact_match_score(prediction, g) for g in gold), default=0.0)
     return exact_match_score(prediction, gold)
@@ -71,7 +69,6 @@ class RLCRRewards:
         self.pattern = FORMAT_PATTERNS[format_pattern]
 
     def format_reward(self, completions, **_) -> list[float]:
-        """1.0 when the full tag structure is present and confidence is in [0, 1]."""
         rewards = []
         for completion in completions:
             content = completion_text(completion)
@@ -83,7 +80,7 @@ class RLCRRewards:
         return rewards
 
     def accuracy_reward(self, completions, answer, source=None, **_) -> list[float]:
-        """Exact match on the <answer> tag; zero unless the format is valid."""
+        # exact match on <answer>; zero unless the format is valid
         golds = list(answer)
         sources = list(source) if source is not None else ["hotpot"] * len(completions)
         formats = self.format_reward(completions)
@@ -97,7 +94,6 @@ class RLCRRewards:
         return rewards
 
     def brier_reward(self, completions, answer, source=None, **_) -> list[float]:
-        """1 - (correctness - confidence)^2, the calibration term."""
         correctness = self.accuracy_reward(completions, answer, source=source)
         formats = self.format_reward(completions)
         rewards = []
@@ -110,12 +106,12 @@ class RLCRRewards:
         return rewards
 
     def mean_confidence_reward(self, completions, **_) -> list[float]:
-        """Logged with a near-zero weight, purely to monitor confidence drift."""
+        # near-zero weight, monitors confidence drift
         return [min(max(_confidence_of(completion_text(c)) or 0.0, 0.0), 1.0)
                 for c in completions]
 
     def confidence_one_or_zero(self, completions, **_) -> list[float]:
-        """Logged with a near-zero weight: fraction collapsing to exactly 0 or 1."""
+        # near-zero weight: fraction collapsing to exactly 0 or 1
         rewards = []
         for completion in completions:
             confidence = min(max(_confidence_of(completion_text(completion)) or 0.0, 0.0), 1.0)
@@ -123,7 +119,7 @@ class RLCRRewards:
         return rewards
 
     def reward_funcs(self) -> list:
-        """Closures in the order ``reward_weights`` in configs/methods/rlcr.yaml expects."""
+        # the order reward_weights in configs/methods/rlcr.yaml expects
 
         def format_reward(completions, **kwargs):
             return self.format_reward(completions, **kwargs)
@@ -153,10 +149,9 @@ ANSWER_TAG_INSTRUCTION = (
 
 
 def _sample_removed_titles(example, rng: random.Random) -> Tuple[int, List[str]]:
-    """Drop paragraphs so the model sometimes lacks the evidence it needs: genuinely
-    unanswerable questions are the point of training a confidence head. RLCR training
-    only -- the shared context table in csr/data.py keeps every paragraph.
-    """
+    # drop paragraphs so the model sometimes lacks the evidence it needs: genuinely
+    # unanswerable questions are the point of training a confidence head. RLCR
+    # training only -- the shared context table in csr/data.py keeps every paragraph.
     supporting = list(example["supporting_facts"]["title"])
     all_titles = list(example["context"]["title"])
     non_supporting = list(set(all_titles) - set(supporting))
@@ -192,7 +187,6 @@ def build_problem(example, rng: random.Random) -> str:
 
 
 def load_hotpot(cfg, split: str = "train", size: int | None = None):
-    """RLCR's own HotpotQA view: paragraphs in the prompt, tags in the answer."""
     from datasets import load_dataset
 
     seed = int(cfg["seed"])

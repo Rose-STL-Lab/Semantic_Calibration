@@ -1,12 +1,9 @@
-"""Rollout generation, plus the prompt rendering that feeds it.
-
-``generate(prompt, n=K)`` returns K rollouts for ONE prompt; unsloth's vLLM fast path
-gets all K back from a single call, otherwise one HuggingFace ``generate`` per rollout.
-The ``_batch`` variants take SEVERAL prompts and still return K rollouts for each, so
-``generate_batch(prompts, n=K)`` is K x len(prompts) completions in one vLLM call --
-that is the ``--question-batch`` path, which exists to amortise the judge's tail latency
-across questions, not to change K.
-"""
+# Rollout generation + the prompt rendering that feeds it.
+# generate(prompt, n=K) -> K rollouts for ONE prompt: one vLLM call on unsloth's
+# fast path, else K HuggingFace calls.
+# generate_batch(prompts, n=K) -> K rollouts for EACH prompt, K x len(prompts)
+# completions in one call. That is --question-batch: it amortises the judge's
+# tail latency, same K.
 
 from __future__ import annotations
 
@@ -16,7 +13,7 @@ import torch
 
 
 def render_generation_prompt(prompt_messages, tokenizer) -> str:
-    """Apply the model's chat template, or fall back to a plain concatenation."""
+    # the model's chat template, or plain concatenation if it has none
     if isinstance(prompt_messages, list) and hasattr(tokenizer, "apply_chat_template") \
             and getattr(tokenizer, "chat_template", None):
         return tokenizer.apply_chat_template(
@@ -44,7 +41,6 @@ def _use_vllm(model) -> bool:
 def generate(model, tokenizer, prompt: str, *, n: int = 1, temperature: float = 0.7,
              top_p: float = 0.95, max_new_tokens: int = 256, seed: int = 42,
              lora_request=None) -> list[str]:
-    """Return ``n`` raw completions for one rendered prompt."""
     if _use_vllm(model):
         from vllm import SamplingParams
 
@@ -100,7 +96,7 @@ def _token_report(tokenizer, prompt: str, raw: list[str]) -> dict:
 def rollouts_with_tokens(model, tokenizer, prompt: str, *, n: int, temperature: float,
                          top_p: float, max_new_tokens: int, seed: int,
                          lora_request=None) -> dict:
-    """Generate ``n`` rollouts and report the prompt / completion token cost."""
+    # plus the prompt / completion token cost
     raw = generate(model, tokenizer, prompt, n=n, temperature=temperature, top_p=top_p,
                    max_new_tokens=max_new_tokens, seed=seed, lora_request=lora_request)
     return _token_report(tokenizer, prompt, raw)
@@ -110,7 +106,7 @@ def rollouts_with_tokens(model, tokenizer, prompt: str, *, n: int, temperature: 
 def generate_batch(model, tokenizer, prompts: Sequence[str], *, n: int, temperature: float,
                    top_p: float, max_new_tokens: int, seed: int,
                    lora_request=None) -> list[list[str]]:
-    """``generate`` for several prompts in one vLLM call, same SamplingParams (seed included)."""
+    # one vLLM call, same SamplingParams (seed included)
     if not _use_vllm(model):
         return [generate(model, tokenizer, p, n=n, temperature=temperature, top_p=top_p,
                          max_new_tokens=max_new_tokens, seed=seed, lora_request=lora_request)
@@ -132,7 +128,7 @@ def generate_batch(model, tokenizer, prompts: Sequence[str], *, n: int, temperat
 def rollouts_with_tokens_batch(model, tokenizer, prompts: Sequence[str], *, n: int,
                                temperature: float, top_p: float, max_new_tokens: int,
                                seed: int, lora_request=None) -> list[dict]:
-    """``rollouts_with_tokens`` for several prompts at once, one report per prompt."""
+    # one report per prompt
     raws = generate_batch(model, tokenizer, prompts, n=n, temperature=temperature, top_p=top_p,
                           max_new_tokens=max_new_tokens, seed=seed, lora_request=lora_request)
     return [_token_report(tokenizer, p, raw) for p, raw in zip(prompts, raws)]

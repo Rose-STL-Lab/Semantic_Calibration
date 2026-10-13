@@ -1,6 +1,6 @@
-"""Dataset loading. Every dataset is mapped onto one record schema:
-``{"prompt": [system, user], "question": str, "answer": str | list (alternatives), "meta": dict}``.
-"""
+# Dataset loading. Every dataset is mapped onto one record schema:
+# {"prompt": [system, user], "question": str,
+#  "answer": str | list (alternatives), "meta": dict}.
 
 from __future__ import annotations
 
@@ -35,9 +35,8 @@ def _hotpot(example, system_prompt, user_template):
 
 
 def _format_hotpot_context(example) -> str:
-    """Distractor paragraphs as "Title: <t>\\n<sentences>" blocks -- byte-identical to the
-    original context-grounded runs, so reused RLVR/RD/RLCR checkpoints see their training prompt.
-    """
+    # "Title: <t>\n<sentences>" blocks -- byte-identical to the original context
+    # runs, so reused RLVR/RD/RLCR checkpoints see their training prompt
     ctx = example.get("context", {}) or {}
     parts = []
     for title, sentences in zip(ctx.get("title", []) or [], ctx.get("sentences", []) or []):
@@ -48,7 +47,7 @@ def _format_hotpot_context(example) -> str:
 
 
 # RLCR numbers the passages and repeats the strict-output reminder inside the problem.
-# Its paragraph *removal* is deliberately NOT reproduced: every method must see the same evidence.
+# Its paragraph *removal* is deliberately not reproduced: same evidence for every method.
 _RLCR_REMINDER = (
     "Your answer will be verified with exact match score. To ensure correct "
     "verification, only provide the answer within the <answer> </answer> tags. "
@@ -57,7 +56,7 @@ _RLCR_REMINDER = (
 
 
 def _format_hotpot_context_rlcr(example) -> str:
-    """The passages in RLCR's own layout: "Paragraph <i>" blocks under rules."""
+    # the passages in RLCR's own layout: "Paragraph <i>" blocks under rules
     ctx = example.get("context", {}) or {}
     sections = []
     for idx, sentences in enumerate(ctx.get("sentences", []) or []):
@@ -68,7 +67,7 @@ def _format_hotpot_context_rlcr(example) -> str:
 
 
 def _hotpot_context(example, system_prompt, user_template, method: str = "CSR"):
-    """HotpotQA with the passages supplied, laid out in each method's own phrasing (as trained)."""
+    # passages supplied, laid out in each method's own phrasing (as trained)
     question = example["question"]
     record = _hotpot(example, system_prompt, user_template)
 
@@ -83,7 +82,7 @@ def _hotpot_context(example, system_prompt, user_template, method: str = "CSR"):
     if not context:
         return record
     if method == "RD":
-        # RD's own context phrasing (`_normalize_squad_dataset_map_function`).
+        # RD's own context phrasing (_normalize_squad_dataset_map_function)
         record["prompt"] = _messages(
             system_prompt, f"Context: {context}, Question: {question}", user_template)
     else:
@@ -149,7 +148,7 @@ BUILDERS = {
     "nq_open": _nq_open,
 }
 
-# MSMARCO has rows with no usable gold answer; they cannot be scored.
+# MSMARCO has rows with no usable gold; unscorable
 REQUIRES_NONEMPTY_GOLD = {"msmarco"}
 
 
@@ -163,11 +162,7 @@ def _resolve_split(raw, requested: str) -> str:
 
 
 def load_split(cfg, split: str = "eval", size: int | None = None):
-    """Load one split of the configured dataset in the unified schema.
-
-    ``split`` is "train" or "eval"; sizes default to the config's
-    ``train_size`` / ``eval_size``.
-    """
+    # split is "train" or "eval"; sizes default to train_size / eval_size
     ds_cfg = cfg["dataset"]
     name = ds_cfg["name"]
     if name not in BUILDERS:
@@ -177,7 +172,7 @@ def load_split(cfg, split: str = "eval", size: int | None = None):
     system_prompt = method_cfg.get("system_prompt", "")
     user_template = method_cfg.get("user_template")
 
-    # dataset may override the method's system prompt; RD/RLCR keep their own format instructions
+    # dataset may override the method's system prompt; RD/RLCR keep their own format
     override = (ds_cfg.get("system_prompt") or {})
     if isinstance(override, str):
         override = {"default": override}
@@ -219,7 +214,5 @@ def load_split(cfg, split: str = "eval", size: int | None = None):
 
 
 def correctness_prompt_kind(cfg) -> str:
-    """Judge prompt for correctness: ``judge`` reuses the equivalence prompt, ``gold`` picks the
-    single- or multi-gold correctness prompt by gold count.
-    """
+    # judge: reuse the equivalence prompt. gold: single/multi correctness by gold count
     return cfg["dataset"].get("correctness_prompt", "judge")

@@ -1,4 +1,4 @@
-"""Trainer callbacks: metric logging, the calibration ramp, periodic validation."""
+# Trainer callbacks: metric logging, the calibration ramp, periodic validation
 
 from __future__ import annotations
 
@@ -11,14 +11,24 @@ import time
 from transformers import TrainerCallback
 
 
+def _open_csv(path: str):
+    header = None
+    if os.path.exists(path) and os.path.getsize(path):
+        # a --resume-from-checkpoint run must not wipe the pre-resume rows
+        with open(path, newline="", encoding="utf-8") as fh:
+            header = next(csv.reader(fh), None) or None
+    mode = "a" if header else "w"
+    return open(path, mode, newline="", encoding="utf-8"), header
+
+
 class MetricCSVCallback(TrainerCallback):
-    """Mirror TRL's scalar logs into ``<run_dir>/train_metrics.csv``."""
+    # TRL's scalar logs -> <run_dir>/train_metrics.csv
 
     def __init__(self, out_dir: str, extra: dict | None = None):
         os.makedirs(out_dir, exist_ok=True)
         self.csv_path = os.path.join(out_dir, "train_metrics.csv")
         self.extra = extra or {}
-        self._fh = open(self.csv_path, "w", newline="", encoding="utf-8")
+        self._fh, self._header = _open_csv(self.csv_path)
         self._writer = None
         print(f"[metrics] {self.csv_path}")
 
@@ -33,9 +43,10 @@ class MetricCSVCallback(TrainerCallback):
             row[key] = getter()
 
         if self._writer is None:
-            header = ["step"] + sorted(k for k in row if k != "step")
+            header = self._header or ["step"] + sorted(k for k in row if k != "step")
             self._writer = csv.DictWriter(self._fh, fieldnames=header, extrasaction="ignore")
-            self._writer.writeheader()
+            if not self._header:
+                self._writer.writeheader()
         self._writer.writerow(row)
         self._fh.flush()
 
@@ -43,13 +54,12 @@ class MetricCSVCallback(TrainerCallback):
         try:
             self._fh.close()
             print(f"[metrics] saved {self.csv_path}")
-        except (OSError, ValueError):
+        except OSError:
             pass
 
 
 class CalibrationRampCallback(TrainerCallback):
-    """Advance CSR's calibration weight with training progress, on the schedule
-    configured by cali_w_schedule (linear or sigmoid; equal endpoints are constant)."""
+    # advances cali_w on cali_w_schedule (linear | sigmoid; equal endpoints = constant)
 
     def __init__(self, reward_computer):
         self.rewards = reward_computer
@@ -67,7 +77,7 @@ class CalibrationRampCallback(TrainerCallback):
 
 
 class JudgeCacheCallback(TrainerCallback):
-    """Periodically report judge cache hit rate -- purely informational."""
+    # judge cache hit rate, informational only
 
     def __init__(self, judge):
         self.judge = judge
@@ -84,11 +94,8 @@ class JudgeCacheCallback(TrainerCallback):
 
 
 class PeriodicEvalCallback(TrainerCallback):
-    """Score the current policy on the validation split every N steps.
-
-    Reuses the trainer's checkpoint for that step when one exists, else writes a
-    throwaway adapter; any failure is logged and training continues.
-    """
+    # scores the policy on the validation split every N steps; that step's checkpoint
+    # if it exists, else a throwaway adapter. Failures are logged, training continues.
 
     def __init__(self, cfg, dataset, tokenizer, judge, run_dir: str,
                  correctness_prompt_kind: str = "judge", every_steps: int = 250):
@@ -101,7 +108,7 @@ class PeriodicEvalCallback(TrainerCallback):
         self.kind = correctness_prompt_kind
         os.makedirs(run_dir, exist_ok=True)
         self.csv_path = os.path.join(run_dir, "validation_metrics.csv")
-        self._fh = open(self.csv_path, "w", newline="", encoding="utf-8")
+        self._fh, self._header = _open_csv(self.csv_path)
         self._writer = None
         print(f"[validation] {self.csv_path}")
 
@@ -117,7 +124,6 @@ class PeriodicEvalCallback(TrainerCallback):
         step = int(state.global_step)
         if self.every_steps <= 0 or step <= 0 or step % self.every_steps:
             return
-        model = model or kwargs.get("model")
         if model is None:
             return
 
@@ -140,7 +146,7 @@ class PeriodicEvalCallback(TrainerCallback):
         from .generation import rollouts_with_tokens
         from .semantic import semantic_confidence
         from .generation import render_generation_prompt
-        from .parsing import extract_completion_text
+        from .parsing import strip_prompt_prefix
 
         train_cfg = self.cfg["method"]["train"]
         markers = self.cfg["model"].get("chat_end_markers", [])
@@ -161,7 +167,7 @@ class PeriodicEvalCallback(TrainerCallback):
                 seed=int(self.cfg["seed"]),
                 lora_request=lora_request,
             )
-            answers = [extract_completion_text(t, markers) for t in generated["raw"]]
+            answers = [strip_prompt_prefix(t, markers) for t in generated["raw"]]
             clusters = semantic_confidence(answers, example["question"], self.judge)
             labels = self.judge.score_against_gold(
                 answers, example["answer"], example["question"], self.kind)
@@ -199,12 +205,14 @@ class PeriodicEvalCallback(TrainerCallback):
             **{key: ("" if value is None else value) for key, value in summary.items()},
         }
         if self._writer is None:
-            self._writer = csv.DictWriter(self._fh, fieldnames=list(row), extrasaction="ignore")
-            self._writer.writeheader()
+            self._writer = csv.DictWriter(self._fh, fieldnames=self._header or list(row),
+                                          extrasaction="ignore")
+            if not self._header:
+                self._writer.writeheader()
         self._writer.writerow(row)
         self._fh.flush()
 
-        # per-question detail, written after the CSV row is safe and guarded on its own
+        # per-question detail, after the CSV row is safe; guarded on its own
         try:
             detail_path = os.path.join(self.run_dir, f"validation_step_{step}.json")
             with open(detail_path, "w", encoding="utf-8") as fh:
@@ -226,12 +234,12 @@ class PeriodicEvalCallback(TrainerCallback):
     def on_train_end(self, args, state, control, **kwargs):
         try:
             self._fh.close()
-        except (OSError, ValueError):
+        except OSError:
             pass
 
 
 class VerbalizedEvalCallback(PeriodicEvalCallback):
-    """Same schedule, for the methods that write their own confidence token."""
+    # same schedule, for the methods that write their own confidence
 
     def _collect(self, model, lora_request):
         from .generation import count_tokens, generate

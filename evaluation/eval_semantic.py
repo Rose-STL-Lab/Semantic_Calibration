@@ -75,7 +75,7 @@ def main():
     from csr.results import RunDir, checkpoint_step, print_summary, resolve_checkpoints
     from csr.semantic import semantic_confidence
     from csr.generation import render_generation_prompt
-    from csr.parsing import extract_completion_text
+    from csr.parsing import strip_prompt_prefix
 
     eval_cfg = cfg["method"]["eval"]
     markers = cfg["model"].get("chat_end_markers", [])
@@ -137,8 +137,8 @@ def main():
             lora_request=lora_request,
         )
 
-        # one record builder for all phases: "both" judges inline, the split
-        # phases call make_record and judge_record from different processes
+        # one record builder for all phases: "both" judges inline, the split phases
+        # call make_record and judge_record from different processes
         def make_record(i, example, gen, answers):
             gold = example["answer"]
             return {
@@ -159,7 +159,7 @@ def main():
             }
 
         def judge_record(record, clusters, labels):
-            """Fill in everything the judge decides, in place."""
+            # everything the judge decides, in place
             for rollout, cid, label in zip(record["rollouts"],
                                            clusters["cluster_ids"], labels):
                 rollout["semantic_id"] = int(cid)
@@ -172,7 +172,6 @@ def main():
             return record
 
         def judge_block(recs):
-            """Cluster and score a block of already-generated records."""
             answers_list = [[r["extracted_answer"] for r in rec["rollouts"]] for rec in recs]
             questions_b = [rec["question"] for rec in recs]
             golds = [rec["gold_answers"][0] if len(rec["gold_answers"]) == 1
@@ -189,7 +188,7 @@ def main():
                 judge_record(rec, clusters, labels)
 
         if args.phase == "judge":
-            # rollouts are on disk; only unjudged records still need the judge
+            # rollouts are on disk; only unjudged records need the judge
             todo = [r for r in records if "confidence" not in r]
             print(f"[judge] {len(todo)} of {len(records)} records still unjudged")
             bar = tqdm(total=len(records), initial=len(records) - len(todo),
@@ -214,7 +213,7 @@ def main():
                     gens = [rollouts_with_tokens(model, tokenizer, prompts[0], **gen_kwargs)]
                 else:
                     gens = rollouts_with_tokens_batch(model, tokenizer, prompts, **gen_kwargs)
-                answers_list = [[extract_completion_text(text, markers) for text in g["raw"]]
+                answers_list = [[strip_prompt_prefix(text, markers) for text in g["raw"]]
                                 for g in gens]
 
                 new = [make_record(i, example, gen, answers)

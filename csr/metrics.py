@@ -1,5 +1,5 @@
-"""Calibration and ranking metrics.  ``p`` is the fraction of the K rollouts the
-judge marked correct for the answer-only methods, 0 or 1 for the verbalized ones."""
+# Calibration and ranking metrics. p is the fraction of the K rollouts the judge
+# marked correct for the answer-only methods, 0 or 1 for the verbalized ones.
 
 from __future__ import annotations
 
@@ -18,11 +18,13 @@ def expected_calibration_error(confidences: Sequence[float], accuracies: Sequenc
     if n == 0:
         return 0.0
 
-    bins = np.linspace(0.0, 1.0, n_bins + 1)
+    # not linspace: its 0.3/0.6/0.7 edges land a ulp high, so a verbalized 0.3
+    # would fall into the bin below
+    bins = np.arange(n_bins + 1) / n_bins
     ece = 0.0
     for i in range(n_bins):
         lo, hi = bins[i], bins[i + 1]
-        # last bin is closed on the right so confidence == 1.0 is counted
+        # last bin closed on the right, so confidence == 1.0 counts
         mask = (conf >= lo) & (conf < hi if i < n_bins - 1 else conf <= hi)
         n_k = int(mask.sum())
         if n_k == 0:
@@ -39,26 +41,26 @@ def brier_score(confidences: Sequence[float], accuracies: Sequence[float]) -> fl
     return float(np.mean((conf - acc) ** 2))
 
 
-def safe_spearman(x: Sequence[float], y: Sequence[float]) -> float | None:
+def _safe_correlation(corr_fn, x: Sequence[float], y: Sequence[float]) -> float | None:
+    # constant input -> undefined rank correlation, scipy returns nan
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     if len(x) < 2 or np.allclose(x, x[0]) or np.allclose(y, y[0]):
         return None
-    r = spearmanr(x, y).correlation
+    r = corr_fn(x, y).correlation
     return None if (r is None or np.isnan(r)) else float(r)
+
+
+def safe_spearman(x: Sequence[float], y: Sequence[float]) -> float | None:
+    return _safe_correlation(spearmanr, x, y)
 
 
 def safe_kendall(x: Sequence[float], y: Sequence[float]) -> float | None:
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    if len(x) < 2 or np.allclose(x, x[0]) or np.allclose(y, y[0]):
-        return None
-    r = kendalltau(x, y).correlation
-    return None if (r is None or np.isnan(r)) else float(r)
+    return _safe_correlation(kendalltau, x, y)
 
 
 def safe_auroc(accuracies: Sequence[float], confidences: Sequence[float]) -> float | None:
-    """AUROC of confidence as a score for "this question was answered correctly"."""
+    # AUROC of confidence as a score for "answered correctly"
     y_true = np.asarray(accuracies, dtype=float)
     if not np.all((y_true == 0) | (y_true == 1)):
         y_true = (y_true >= 0.5).astype(int)
@@ -74,7 +76,6 @@ def safe_auroc(accuracies: Sequence[float], confidences: Sequence[float]) -> flo
 
 def summarize(confidences: Sequence[float], accuracies: Sequence[float],
               n_bins: int = 10) -> dict:
-    """The metric block reported for every run."""
     conf = list(confidences)
     acc = list(accuracies)
     return {

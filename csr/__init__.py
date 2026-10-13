@@ -1,7 +1,6 @@
-"""CSR -- Calibration via Semantic Reward.
-
-config/text/metrics/semantic/results are pure Python + numpy; modeling/generation need torch + unsloth.
-"""
+# CSR -- Calibration via Semantic Reward.
+# config/parsing/metrics/semantic/results are pure Python + numpy;
+# modeling/generation need torch + unsloth.
 
 from .config import (  # noqa: F401
     add_common_args,

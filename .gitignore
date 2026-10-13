@@ -30,8 +30,8 @@ _archive/
 analysis/semdens_formal.py
 
 
-# One-off launchers and probes. The entry points are scripts/train.sh,
-# scripts/eval.sh and scripts/serve/serve_judge.sh.
+# One-off launchers and probes. The entry points are train/train_*.py,
+# evaluation/eval_*.py and scripts/serve/serve_judge.sh.
 scripts/_runlog/
 scripts/chain_rd_runs.sh
 scripts/keeper_csr_qwen.sh

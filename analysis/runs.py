@@ -1,4 +1,5 @@
-"""Run directories for the appendix scripts: <METHOD>_<backbone>_<dataset>[_<arm>]_<step>_<judge>_k<K>."""
+# Run directories for the appendix scripts:
+# <METHOD>_<backbone>_<dataset>[_<arm>]_<step>_<judge>_k<K>.
 
 from __future__ import annotations
 
@@ -14,8 +15,8 @@ DATASETS = [
 
 MODEL_LABELS = {"llama8b": "Llama", "qwen7b": "Qwen", "mistral7b": "Mistral"}
 
-# K=16 for the methods whose confidence comes from the rollout spread, greedy
-# decoding (k1) for the two that verbalize a confidence.
+# K=16 where confidence comes from the rollout spread; greedy (k1) for the two
+# that verbalize one.
 RUN_TEMPLATES = {
     "Base": "Base_{model}_{dataset}_base_oss_k16",
     "RLVR": "RLVR_{model}_{dataset}_step2500_oss_k16",
@@ -24,16 +25,14 @@ RUN_TEMPLATES = {
     "CSR": "CSR_{model}_{dataset}_z10_step2500_oss_k16",
 }
 
-# Methods whose confidence is derived from semantic dispersion rather than read
-# off a verbalized scalar.
+# confidence from semantic dispersion, not read off a verbalized scalar
 SEMANTIC_METHODS = {"Base", "RLVR", "CSR"}
 
-# SemDens and the SIMBA rules read per-rollout semantic clusters, which only the
-# sampling-based methods record, so they iterate this instead of RUN_TEMPLATES.
+# SemDens and the SIMBA rules need per-rollout clusters, which only the sampling
+# methods record -- they iterate this, not RUN_TEMPLATES.
 SEMANTIC_TEMPLATES = {m: t for m, t in RUN_TEMPLATES.items() if m in SEMANTIC_METHODS}
 
 
 
 def run_name(method: str, model: str, dataset: str) -> str:
-    """The directory under ``results/`` holding one method/model/dataset run."""
     return RUN_TEMPLATES[method].format(model=model, dataset=dataset)

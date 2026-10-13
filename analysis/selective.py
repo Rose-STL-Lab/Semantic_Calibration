@@ -37,11 +37,7 @@ def conf_acc(exp: str) -> tuple[np.ndarray, np.ndarray]:
 
 
 def selective(conf: np.ndarray, acc: np.ndarray) -> tuple[float, float]:
-    """AURAC and AUGRC over every cut-off, with ties resolved in expectation.
-
-    The label is the binarised 1[acc >= 0.5], not the rollout fraction the rest of
-    analysis/ uses.
-    """
+    # label is 1[acc >= 0.5], not the rollout fraction the rest of analysis/ uses
     label = (acc >= 0.5).astype(float)
     n = len(label)
     counts = np.arange(1, n + 1)
@@ -70,7 +66,7 @@ def selective(conf: np.ndarray, acc: np.ndarray) -> tuple[float, float]:
 
 
 def table5(latex: bool) -> None:
-    """Table 5: questions accepted in decreasing order of the method's own confidence."""
+    # Table 5: accepted in decreasing order of the method's own confidence
     for model in MODELS:
         rows = {}
         for method, pattern in RUN_TEMPLATES.items():
@@ -94,7 +90,7 @@ def table5(latex: bool) -> None:
             for c in cols:
                 r, g = rows[method][c]
                 if latex:
-                    # The table gives AURAC and AUGRC their own columns.
+                    # AURAC and AUGRC get their own columns
                     sr = f"\\textbf{{{r:.4f}}}" if abs(r - best_r[c]) < 1e-12 else f"{r:.4f}"
                     sg = f"\\textbf{{{g:.4f}}}" if abs(g - best_g[c]) < 1e-12 else f"{g:.4f}"
                     out.extend((sr, sg))
@@ -109,10 +105,7 @@ def table5(latex: bool) -> None:
 
 
 def table8(latex: bool) -> None:
-    """Relative change vs Base, averaged over model families.
-
-    (M-B)/B for accuracy and AUROC but (B-M)/B for ECE, so positive is always better.
-    """
+    # Table 8: (M-B)/B for acc and AUROC, (B-M)/B for ECE -- positive is always better
     def metrics(exp):
         s = load(exp)["summary"]
         return s["accuracy"], s["ece"], s["auroc"]
@@ -163,7 +156,7 @@ def table8(latex: bool) -> None:
 
 
 def table12(latex: bool) -> None:
-    """Table 12: fraction of questions whose verbalized confidence parsed and was in range."""
+    # Table 12: fraction whose verbalized confidence parsed and was in range
     for model in MODELS:
         if latex:
             print(f"\\multirow{{5}}{{*}}{{{model.capitalize()}}}")

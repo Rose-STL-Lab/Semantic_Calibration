@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-"""Rebuild F1-train + F1-eval runs by reclustering saved rollouts; sources untouched.
-
-Rollouts are not regenerated and correctness stays the existing gpt-oss-20b
-labels, so only confidence and clusters change; output goes to a separate
-``*_semf1_k16`` run dir.
-"""
+# Rebuild F1-train + F1-eval runs by reclustering saved rollouts; sources untouched.
+# Rollouts are not regenerated and correctness stays the existing gpt-oss-20b
+# labels, so only confidence and clusters change. Output: a separate *_semf1_k16 dir.
 
 from __future__ import annotations
 
@@ -87,7 +84,7 @@ def main() -> None:
             if any(len(r.get("rollouts", [])) != 16 for r in records):
                 raise RuntimeError(f"source is not uniformly K=16: {source_path}")
 
-            # F1EquivalenceJudge uses >= threshold, matching CSR-F1 training.
+            # F1EquivalenceJudge uses >=, matching CSR-F1 training
             judge = F1EquivalenceJudge(
                 object(), {"judge": {"f1_threshold": threshold}}, chat_end_markers=()
             )
@@ -105,6 +102,10 @@ def main() -> None:
                 record["num_semantic_clusters"] = block["num_clusters"]
                 record["semantic_entropy"] = block["semantic_entropy"]
                 record["confidence"] = block["confidence"]
+                # extracted_answers walks record["rollouts"] in order, so the ids
+                # line up; analysis/ recomputes clusters from the rollout level
+                for rollout, cluster_id in zip(record["rollouts"], block["cluster_ids"]):
+                    rollout["semantic_id"] = cluster_id
 
             summary = summarize(
                 [r["confidence"] for r in records],

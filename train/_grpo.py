@@ -1,4 +1,4 @@
-"""Shared GRPO setup for RLVR and CSR; per-method settings come from configs/methods/."""
+# Shared GRPO setup for RLVR and CSR; per-method settings from configs/methods/
 
 from __future__ import annotations
 

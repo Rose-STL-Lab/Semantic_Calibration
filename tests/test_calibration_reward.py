@@ -1,8 +1,6 @@
 #!/usr/bin/env python
-"""CSR's calibration reward, driven by a stub judge -- no GPU and no API key.
-
-    python tests/test_calibration_reward.py
-"""
+# CSR's calibration reward, driven by a stub judge -- no GPU and no API key.
+# python tests/test_calibration_reward.py
 
 from __future__ import annotations
 
@@ -22,7 +20,7 @@ from csr.rewards import CE_MAX, CE_MIN, DELTA_CE, RewardComputer  # noqa: E402
 
 
 def standardize(values):
-    """GRPO's per-group advantage: (r - mean) / std, or None if degenerate."""
+    # GRPO's per-group advantage: (r - mean) / std, or None if degenerate
     mean = sum(values) / len(values)
     var = sum((v - mean) ** 2 for v in values) / len(values)
     if var < 1e-18:
@@ -43,7 +41,7 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 
 
 class StubJudge:
-    """Answers pair queries from `equivalent(j, i)`; records every call."""
+    # answers pair queries from equivalent(j, i); records every call
 
     def __init__(self, correct, equivalent, missing_pairs=()):
         self.correct = correct              # list[int], one per rollout
@@ -132,7 +130,7 @@ def test_permutation_equivariance():
 
 
 def reward_for_mismatches(m: int, correct: bool) -> float:
-    """Reward of rollout 0 when exactly `m` of its K-1 peers mismatch its label."""
+    # reward of rollout 0 when exactly m of its K-1 peers mismatch its label
     texts = [f"r{i}" for i in range(K)]
 
     if correct:
@@ -237,7 +235,7 @@ def test_affine_equivalence_under_grpo():
 
 
 def trl_advantage(rewards):
-    """TRL 0.24's default scale_rewards='group': centre, divide by unbiased std + 1e-4."""
+    # TRL 0.24's default scale_rewards='group': centre, divide by unbiased std + 1e-4
     r = torch.tensor(rewards, dtype=torch.float32)
     return ((r - r.mean()) / (r.std() + 1e-4)).tolist()
 
@@ -314,7 +312,7 @@ def test_missing_verdicts_dropped():
     # kept: 2 mismatching peers of 7 -> 5/7.  dropped: 1 mismatching of 6 -> 5/6.
     want_full = (CE_MAX - (CE_MIN + (2 / 7) * DELTA_CE)) / DELTA_CE
     want_drop = (CE_MAX - (CE_MIN + (1 / 6) * DELTA_CE)) / DELTA_CE
-    # If the unreadable verdict were silently counted as NO it would stay at 2/7.
+    # counted silently as NO it would stay at 2/7
     check("an unreadable pair leaves the denominator, it is not counted as NO",
           abs(full - want_full) < 1e-3 and abs(dropped - want_drop) < 1e-3,
           f"full={full:.4f} (want {want_full:.4f})  dropped={dropped:.4f} (want {want_drop:.4f})")
@@ -350,13 +348,13 @@ def test_cali_w_applied_once():
     rc2 = make_computer(StubJudge([1] * K, eq), cali_w=0.2)
     r1 = rc1.calibration_reward(*make_batch(texts))[0]
     r2 = rc2.calibration_reward(*make_batch(texts))[0]
-    # rewards are in [0, 1]; float32 output.
+    # rewards in [0, 1]; float32 output
     check("reward scales linearly with cali_w, applied exactly once",
           abs(r2 - 0.2 * r1) < 1e-4, f"{r2} vs {0.2 * r1}")
 
 
 class RecordingJudge(Judge):
-    """Judge with the API replaced by a scripted responder."""
+    # judge with the API replaced by a scripted responder
 
     def __init__(self, cfg, responses):
         super().__init__(cfg)

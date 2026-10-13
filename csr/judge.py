@@ -1,8 +1,6 @@
-"""LLM judge: semantic equivalence and correctness, both as one YES/NO call.
-
-Configured by configs/judge.yaml; credentials from the environment
-(OPENAI_API_KEY, plus OPENAI_API_VERSION / OPENAI_AZURE_ENDPOINT for Azure).
-"""
+# LLM judge: semantic equivalence and correctness, both as one YES/NO call.
+# Configured by configs/judge.yaml; credentials from the environment
+# (OPENAI_API_KEY, plus OPENAI_API_VERSION / OPENAI_AZURE_ENDPOINT for Azure).
 
 from __future__ import annotations
 
@@ -23,7 +21,7 @@ _YESNO_ANY_RE = re.compile(r"\b(YES|NO)\b")
 
 
 def parse_yes_no(text: str) -> int | None:
-    """1 for YES, 0 for NO, None if the verdict could not be read."""
+    # 1 YES, 0 NO, None if unreadable
     if not text:
         return None
     match = _YESNO_LINE_RE.search(text)
@@ -36,7 +34,7 @@ def parse_yes_no(text: str) -> int | None:
 
 
 class LRUCache(OrderedDict):
-    """Bounded LRU keyed by short digests, so memory stays flat over a long run."""
+    # keyed by short digests; memory stays flat over a long run
 
     def __init__(self, max_size: int = 200_000):
         super().__init__()
@@ -59,7 +57,7 @@ def new_stats() -> dict:
 
 
 class Judge:
-    """Batched YES/NO judge over an OpenAI-compatible chat-completions API."""
+    # batched YES/NO over an OpenAI-compatible chat-completions API
 
     def __init__(self, cfg, chat_end_markers: Sequence[str] = ()):
         judge_cfg = cfg["judge"] if "judge" in cfg else cfg
@@ -70,12 +68,12 @@ class Judge:
         self.sleep_sec = float(judge_cfg.get("sleep_sec", 1.5))
         self.max_workers = int(judge_cfg.get("max_workers", 6))
         self.batch_size = int(judge_cfg.get("batch_size", 16))
-        # Short per-request timeout: the SDK default is 600 s, so one stalled
+        # short per-request timeout: the SDK default is 600 s, so one stalled
         # connection parks a whole batch. Verdicts are unaffected at temperature 0.
         self.request_timeout_sec = float(judge_cfg.get("request_timeout_sec", 20.0))
         self.client_max_retries = int(judge_cfg.get("client_max_retries", 1))
-        # Optional self-hosted judge (e.g. a local vLLM server); unset -> the API
-        # client. A reasoning judge spends tokens before its verdict: raise max_tokens.
+        # optional self-hosted judge (e.g. local vLLM); unset -> the API client.
+        # A reasoning judge spends tokens before its verdict: raise max_tokens.
         self.base_url = judge_cfg.get("base_url") or None
         self.base_api_key = judge_cfg.get("api_key") or "EMPTY"
         self.reasoning_effort = judge_cfg.get("reasoning_effort") or None
@@ -166,13 +164,9 @@ class Judge:
         return_missing: bool = False,
         template: str | None = None,
     ):
-        """Judge a batch of (question, A, B) triples.
-
-        ``template`` defaults to the symmetric prompt; any other is directional
-        (A and B keep their roles). Returns ``(labels, n_unparsed)``, or
-        ``(labels, n_unparsed, missing)`` with ``return_missing=True``, where
-        ``missing`` indexes verdicts left unparsable (label 0, no information).
-        """
+        # template defaults to the symmetric prompt; any other is directional (A and B
+        # keep their roles). -> (labels, n_unparsed), or (labels, n_unparsed, missing)
+        # with return_missing=True; missing indexes the unparsable ones (label 0).
         assert len(preds) == len(golds) == len(questions)
         template = self.prompt if template is None else template
         stats = stats if stats is not None else self.same_stats
@@ -224,7 +218,7 @@ class Judge:
                     time.sleep(self.sleep_sec)
             return idx, parse_yes_no(text)
 
-        # One pool over all pending verdicts; a pool per chunk idles on each tail.
+        # one pool over all pending verdicts; a pool per chunk idles on each tail
         in_flight_cap = max(int(self.batch_size), 4 * self.max_workers)
         for _ in range(self.max_retries):
             if not pending:
@@ -258,10 +252,7 @@ class Judge:
 
     # -- convenience wrappers -------------------------------------------
     def symmetric_batched(self, a_list, b_list, questions):
-        """One symmetric equivalence verdict per unordered pair.
-
-        Returns ``(labels, n_unparsed, missing)``; see ``yes_no_batched``.
-        """
+        # one symmetric verdict per unordered pair; returns as yes_no_batched
         return self.yes_no_batched(a_list, b_list, questions,
                                    stats=self.same_stats, return_missing=True)
 
@@ -270,20 +261,20 @@ class Judge:
         return self.yes_no_batched(preds, golds, questions,
                                    stats=self.correctness_stats, template=template)
 
+    def _gold_template(self, gold, kind: str):
+        # "judge": the equivalence prompt (template None). "gold": single/multi by
+        # gold count. Shared so the batch path cannot drift.
+        if kind == "judge":
+            return None
+        if isinstance(gold, (list, tuple)) and len(gold) > 1:
+            return self.multi_gold_prompt
+        return self.single_gold_prompt
+
     def score_against_gold(self, preds: Sequence[str], gold, question: str,
                            kind: str = "judge") -> list[int]:
-        """Score every prediction for one question against its gold answer(s).
-
-        ``kind`` comes from the dataset config: ``"judge"`` reuses the equivalence
-        prompt, ``"gold"`` picks single/multi_gold_prompt by gold count (directional).
-        """
+        # every prediction for one question against its gold answer(s)
         gold_text = format_gold(gold, self.chat_end_markers)
-        if kind == "judge":
-            template = None                     # -> self.prompt
-        elif isinstance(gold, (list, tuple)) and len(gold) > 1:
-            template = self.multi_gold_prompt
-        else:
-            template = self.single_gold_prompt
+        template = self._gold_template(gold, kind)
         labels, _ = self.correctness_batched(
             preds=list(preds),
             golds=[gold_text] * len(preds),
@@ -294,17 +285,11 @@ class Judge:
 
     def score_against_gold_batch(self, preds_list: Sequence[Sequence[str]], golds,
                                  questions: Sequence[str], kind: str = "judge") -> list[list[int]]:
-        """``score_against_gold`` for many questions: one correctness call per
-        template, with each question's template chosen exactly as there."""
+        # one correctness call per template, chosen as in score_against_gold
         groups: dict = {}
         for pos, (preds, gold, question) in enumerate(zip(preds_list, golds, questions)):
             gold_text = format_gold(gold, self.chat_end_markers)
-            if kind == "judge":
-                template = None
-            elif isinstance(gold, (list, tuple)) and len(gold) > 1:
-                template = self.multi_gold_prompt
-            else:
-                template = self.single_gold_prompt
+            template = self._gold_template(gold, kind)
             group = groups.setdefault(template, ([], [], [], []))
             for k, pred in enumerate(preds):
                 group[0].append(pred)
@@ -345,14 +330,9 @@ class Judge:
 
 
 def make_judge(cfg, chat_end_markers: Sequence[str] = ()):
-    """The judge this run is configured to use.
-
-    Correctness is always the LLM judge, as every reported number is. The one switch
-    replaces the rollout-vs-rollout equivalence call with token F1, which is the CSR-F1
-    configuration of Table 8:
-
-        --set judge.equivalence=f1 --set judge.f1_threshold=0.5
-    """
+    # Correctness is always the LLM judge, as every reported number is. The one switch
+    # replaces rollout-vs-rollout equivalence with token F1 -- Table 8's CSR-F1:
+    #     --set judge.equivalence=f1 --set judge.f1_threshold=0.5
     judge_cfg = cfg["judge"] if "judge" in cfg else cfg
     if "backend" in judge_cfg:
         # --set creates unknown keys silently, so a stale judge.backend would be ignored
@@ -369,7 +349,6 @@ def make_judge(cfg, chat_end_markers: Sequence[str] = ()):
 
 
 def format_gold(gold, chat_end_markers: Sequence[str] = ()) -> str:
-    """Render a gold answer (string or list of aliases) for the judge prompt."""
     from .parsing import normalize_for_equiv
 
     if isinstance(gold, (list, tuple)):

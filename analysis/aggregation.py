@@ -40,7 +40,7 @@ def sim_matrix(answers: list[str]) -> np.ndarray:
 
 
 def arithmetic(records: list[dict]) -> np.ndarray:
-    """Group mean pairwise similarity, one number per question."""
+    # group mean pairwise similarity, one per question
     out = []
     for rec in records:
         m = sim_matrix(rec["answers"])
@@ -50,17 +50,17 @@ def arithmetic(records: list[dict]) -> np.ndarray:
     return np.asarray(out)
 
 
-# departs from SIMBA-UQ: sorted sims, full-depth forest, question-grouped 5-fold
-# instead of depth 4 and one random 50/50 split; cf. analysis/simba.py, Appendix app:alt_estimators
+# departs from SIMBA-UQ: sorted sims, full-depth forest, question-grouped 5-fold,
+# not depth 4 + one random 50/50 split (Appendix app:alt_estimators)
 def clf_pairs_gen(records: list[dict]) -> np.ndarray:
-    """Out-of-fold random-forest posterior, averaged per question."""
+    # out-of-fold random-forest posterior, averaged per question
     feats, labels, groups = [], [], []
     for qi, rec in enumerate(records):
         m = sim_matrix(rec["answers"])
         k = len(m)
         lp = rec.get("logprob")
         for i in range(k):
-            # sorted: rollouts are exchangeable, index order carries no information
+            # sorted: rollouts are exchangeable, index order is noise
             sims = sorted(float(m[i, j]) for j in range(k) if j != i)
             gen = [float(np.exp(lp[i]))] if lp is not None else []
             feats.append(sims + gen)
@@ -91,12 +91,12 @@ RULES = {"arithmetic": arithmetic, "clf-pairs+gen": clf_pairs_gen}
 
 
 NO_LOGPROBS = False          # set by --no-logprobs; see attach_logprobs
-# the transformers scorer (analysis/logprobs_hf.py) is what reproduces Table 7
+# analysis/logprobs_hf.py is what reproduces Table 7
 LOGPROBS_NAME = "logprobs_hf.json"
 
 
 def attach_logprobs(exp: str, records: list[dict], k: int) -> bool:
-    """Add the "+gen" log-probability feature from the run's LOGPROBS_NAME file, if present."""
+    # the "+gen" log-prob feature, from the run's LOGPROBS_NAME file if present
     if NO_LOGPROBS:          # similarities only, so every backbone is scored alike
         return False
     path = RESULTS / exp / LOGPROBS_NAME

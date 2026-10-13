@@ -1,8 +1,6 @@
-"""Token-F1 equivalence: equivalent(a, b) = F1(a, b) >= threshold, deterministic and
-offline, wrapped around the LLM judge so correctness labels stay the LLM's.
-
-This is the CSR-F1 configuration: ``--set judge.equivalence=f1``.
-"""
+# Token-F1 equivalence: equivalent(a, b) = F1(a, b) >= threshold. Deterministic and
+# offline, wrapped around the LLM judge so correctness labels stay the LLM's.
+# The CSR-F1 configuration: --set judge.equivalence=f1
 
 from __future__ import annotations
 
@@ -18,8 +16,6 @@ from .parsing import canonicalize_answer
 # and RD's training loop tokenize identically.
 # https://github.com/mandarjoshi90/triviaqa/blob/master/evaluation/triviaqa_evaluation.py
 def normalize_answer(s: str) -> str:
-    """Lower text and remove punctuation, articles and extra whitespace."""
-
     def remove_articles(text):
         return re.sub(r"\b(a|an|the)\b", " ", text)
 
@@ -53,20 +49,11 @@ def f1_score(prediction: str, ground_truth: str) -> float:
 
 
 def f1_score_aliases(prediction, aliases: Sequence[str]) -> float:
-    """Best F1 over every acceptable answer, as RD's f1_score_aliases does."""
+    # best F1 over the aliases, as RD does
     if prediction is None:
         return 0.0
     scores = [f1_score(prediction, a) for a in aliases if a is not None]
     return max(scores) if scores else 0.0
-
-
-def _as_aliases(gold) -> list[str]:
-    """A gold field is either one string or a list of acceptable answers."""
-    if gold is None:
-        return []
-    if isinstance(gold, (list, tuple)):
-        return [str(g) for g in gold if g is not None and str(g).strip() != ""]
-    return [str(gold)]
 
 
 def _record(stats: dict, labels: Sequence[int]) -> None:
@@ -81,11 +68,9 @@ def new_stats() -> dict:
 
 
 class F1EquivalenceJudge:
-    """LLM judge for correctness, token F1 for rollout-rollout equivalence (CSR-F1).
-
-    Note ``>=`` here, as in the original CSR-F1 scripts (RD's own exact-match uses ``>``)
-    like RD. Everything except ``symmetric_batched`` forwards to the LLM judge.
-    """
+    # LLM judge for correctness, token F1 for rollout-rollout equivalence (CSR-F1).
+    # Note >=, as in the original CSR-F1 scripts (RD's exact match uses >).
+    # Everything but symmetric_batched forwards to the LLM judge.
 
     def __init__(self, llm_judge, cfg, chat_end_markers: Sequence[str] = ()):
         judge_cfg = cfg["judge"] if "judge" in cfg else cfg

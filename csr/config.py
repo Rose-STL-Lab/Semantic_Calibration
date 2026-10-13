@@ -1,4 +1,5 @@
-"""Layered YAML config, merged in order: default -> judge -> model -> method -> dataset -> --set."""
+# Layered YAML config, merged in order:
+# default -> judge -> model -> method -> dataset -> --set.
 
 from __future__ import annotations
 
@@ -35,7 +36,7 @@ def _deep_merge(base: dict, extra: dict) -> dict:
 
 
 def _coerce(text: str) -> Any:
-    """Parse an override value with YAML rules (ints, floats, bools, lists)."""
+    # YAML rules: ints, floats, bools, lists come through typed
     try:
         return yaml.safe_load(text)
     except yaml.YAMLError:
@@ -85,7 +86,7 @@ def load_config(
         os.path.join(root, "judge.yaml"),
         os.path.join(root, "models", f"{model}.yaml"),
         os.path.join(root, "methods", f"{_method_slug(method)}.yaml"),
-        # dataset merged last so it overrides the method defaults (context split needs a longer window)
+        # dataset last, overriding the method defaults (context needs a longer window)
         os.path.join(root, "datasets", f"{dataset}.yaml"),
     ):
         cfg = _deep_merge(cfg, _read_yaml(part))
@@ -93,7 +94,7 @@ def load_config(
     for assignment in overrides:
         _apply_override(cfg, assignment)
 
-    # Paths in the config are repo-relative unless the user gave an absolute one.
+    # repo-relative unless absolute
     for key, value in list(cfg.get("paths", {}).items()):
         if isinstance(value, str) and not os.path.isabs(value):
             cfg["paths"][key] = os.path.join(REPO_ROOT, value)
@@ -102,18 +103,15 @@ def load_config(
 
 
 def checkpoint_dir(cfg: dict, exp_name: str | None = None) -> str:
-    """``ckpt/<METHOD>/<model.ckpt_name>`` (ckpt_name is llama8b/qwen7b/mistral7b, not the config key).
-
-    ``exp_name`` replaces the model segment so two hyperparameter variants do not overwrite each other.
-    """
+    # ckpt/<METHOD>/<ckpt_name>, where ckpt_name is llama8b/qwen7b/mistral7b, not the
+    # config key. exp_name replaces the model segment so two variants cannot collide.
     leaf = exp_name or cfg["model"].get("ckpt_name") or cfg["model"]["name"]
     return os.path.join(cfg["paths"]["ckpt"], str(cfg["method"]["name"]), str(leaf))
 
 
 def default_exp_name(cfg: dict, checkpoint: str | None = None) -> str:
-    """Fallback name (``CSR_qwen_trivia_checkpoint-2500``) when ``--exp-name`` is absent;
-    ``results/`` dirs are named explicitly and the two conventions are not interchangeable.
-    """
+    # only when --exp-name is absent (CSR_qwen_trivia_checkpoint-2500); results/ dirs
+    # are named explicitly -- the two conventions are not interchangeable
     parts = [cfg["method"]["name"], cfg["model"]["name"], cfg["dataset"]["name"]]
     if checkpoint:
         parts.append(os.path.basename(str(checkpoint).rstrip("/")))
@@ -126,7 +124,7 @@ def default_exp_name(cfg: dict, checkpoint: str | None = None) -> str:
 def add_common_args(parser: argparse.ArgumentParser, *, with_method: bool = True,
                     dataset_default: str | None = None,
                     dataset_choices: list[str] | None = None) -> None:
-    """The arguments every entry point shares; ``dataset_default`` makes ``--dataset`` optional."""
+    # dataset_default makes --dataset optional
     if with_method:
         parser.add_argument("--method", required=True, choices=METHODS,
                             help="which method's config to load")

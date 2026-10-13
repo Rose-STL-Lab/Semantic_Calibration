@@ -1,8 +1,6 @@
 #!/usr/bin/env python
-"""The batched evaluation path must reproduce the one-question path exactly.
-
-    python tests/test_question_batch.py
-"""
+# The batched evaluation path must reproduce the one-question path exactly.
+# python tests/test_question_batch.py
 
 from __future__ import annotations
 
@@ -15,7 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from csr.config import load_config  # noqa: E402
 from csr.judge import Judge  # noqa: E402
-from csr.semantic import semantic_confidence, semantic_confidence_batch  # noqa: E402
+from csr.semantic import (  # noqa: E402
+    cluster_entropy, semantic_confidence, semantic_confidence_batch)
 
 FAILURES = []
 
@@ -79,6 +78,17 @@ def main():
               == (bat_judge.same_stats["unparsed"], bat_judge.correctness_stats["unparsed"]))
         check("K=0 and K=1 questions present", any(len(a) == 0 for _, a, _ in qs)
               and any(len(a) == 1 for _, a, _ in qs))
+
+    # cluster ids are numbered in rollout order, so the entropy must not depend on it
+    rng = random.Random(7)
+    for sizes in ((10, 3, 2, 1), (5, 5, 3, 2, 1), (7, 4, 3, 1, 1), tuple([1] * 14 + [2])):
+        seen = set()
+        for _ in range(40):
+            ids = []
+            for cluster_id, size in enumerate(rng.sample(sizes, len(sizes))):
+                ids += [cluster_id] * size
+            seen.add(cluster_entropy(ids))
+        check(f"entropy is permutation-invariant for cluster sizes {sizes}", len(seen) == 1)
 
     print("\n" + "=" * 70)
     if FAILURES:

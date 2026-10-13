@@ -1,6 +1,5 @@
-"""One run directory ``results/<exp_name>/`` holding config.yaml, results.json
-(the artefact to read afterwards) and results.csv (the same data, flat).
-"""
+# One run directory results/<exp_name>/ holding config.yaml, results.json (the
+# artefact to read afterwards) and results.csv (the same data, flat).
 
 from __future__ import annotations
 
@@ -12,7 +11,7 @@ from typing import Iterable
 
 from .config import dump_config
 
-# per-question fields repeated on every rollout row, so a CSV row is self-contained
+# per-question fields repeat on every rollout row, so a row is self-contained
 _QUESTION_FIRST = ("idx", "question", "gold_answers")
 _ROLLOUT_ORDER = ("rollout", "full_answer", "extracted_answer", "semantic_id",
                   "correct", "completion_tokens")
@@ -26,19 +25,19 @@ class RunDir:
         self.config_path = os.path.join(self.path, "config.yaml")
         self.results_path = os.path.join(self.path, "results.json")
         self.csv_path = os.path.join(self.path, "results.csv")
-        # kept for callers that print where they resume from
+        # for callers that print where they resume from
         self.records_path = self.results_path
         self._meta: dict = {}
         self._records: list[dict] = []
 
     def save_config(self, cfg, checkpoint: str | None = None) -> None:
-        """Write config.yaml and remember method/model/dataset/checkpoint for results.json."""
+        # also remembers method/model/dataset/checkpoint for results.json
         dump_config(cfg, self.config_path)
         self._meta = _describe(self.exp_name, cfg, checkpoint)
 
     # -- incremental records --------------------------------------------
     def load_records(self, limit: int | None = None) -> list[dict]:
-        """Read back whatever a previous run of this experiment finished, to resume from."""
+        # what a previous run of this experiment finished, to resume from
         if not os.path.exists(self.results_path) or os.path.getsize(self.results_path) == 0:
             return []
         try:
@@ -50,12 +49,12 @@ class RunDir:
         if limit is not None:
             rows = rows[:limit]
         # a copy: eval_semantic.py appends to what it gets back and also calls
-        # append_records(), so aliasing would count every resumed question twice
+        # append_records(), so aliasing would double-count every resumed question
         self._records = list(rows)
         return rows
 
     def append_records(self, rows: Iterable[dict]) -> None:
-        """Append-only: add finished questions and rewrite results.json as a partial."""
+        # append-only; rewrites results.json as a partial
         rows = list(rows)
         if not rows:
             return
@@ -63,8 +62,7 @@ class RunDir:
         self._write_json(status="partial", summary=None)
 
     def rewrite_records(self, rows: Iterable[dict]) -> None:
-        """Replace the stored records: the judge phase of a split generate/judge run
-        edits records already on disk, which append_records() cannot do."""
+        # the judge phase edits records already on disk; append_records cannot
         self._records = list(rows)
         self._write_json(status="partial", summary=None)
 
@@ -103,8 +101,7 @@ class RunDir:
 
 
 def write_rows_csv(path: str, rows) -> None:
-    """Flat rows with a stable column order; shared with the training-time validation
-    callback so both produce the same columns."""
+    # stable column order, shared with the validation callback so both match
     rows = list(rows)
     if not rows:
         return
@@ -137,8 +134,8 @@ def _describe(exp_name: str, cfg, checkpoint: str | None) -> dict:
 
 
 def flatten_records(records: Iterable[dict]) -> Iterable[dict]:
-    """One flat row per rollout, or per question when a record has no rollouts;
-    question-level fields (confidence, accuracy, ...) repeat on each rollout row."""
+    # one row per rollout, or per question when there are none; question-level
+    # fields (confidence, accuracy, ...) repeat on each rollout row
     for rec in records:
         rollouts = rec.get("rollouts")
         base = {k: v for k, v in rec.items() if k != "rollouts"}
@@ -157,18 +154,17 @@ def _csvable(value):
         return json.dumps(value, ensure_ascii=False, default=_jsonable)
     if hasattr(value, "item"):
         try:
-            return value.item()
-        except (ValueError, AttributeError):
+            return value.item()          # numpy scalar; an array of size > 1 raises
+        except ValueError:
             pass
     return value
 
 
 def _jsonable(value):
-    """numpy scalars and anything else json cannot serialize on its own."""
     if hasattr(value, "item"):
         try:
-            return value.item()
-        except (ValueError, AttributeError):
+            return value.item()          # numpy scalar; an array of size > 1 raises
+        except ValueError:
             pass
     return str(value)
 
@@ -191,8 +187,7 @@ def print_summary(summary: dict, title: str = "") -> None:
 
 
 def resolve_checkpoints(path: str | None) -> list[str | None]:
-    """Expand ``--ckpt``: one ``checkpoint-N`` directory, a parent holding several,
-    or ``None`` for a base-model run."""
+    # one checkpoint-N directory, a parent holding several, or None for a base run
     if not path:
         return [None]
 
