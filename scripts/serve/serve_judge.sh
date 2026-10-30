@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Serve the equivalence / correctness judge that training and evaluation call.
 #   bash scripts/serve/serve_judge.sh [GPU] [PORT] [MODEL]
-# Defaults are the paper's judge, and port 8310 is configs/judge.yaml's default
-# base_url, so a default run needs no --set. For anything else:
+# Defaults are the paper's judge. configs/judge.yaml leaves base_url null, which means
+# the hosted OpenAI endpoint, so a server started here is NOT picked up on its own:
+# every run must be told where to find it, or the judge calls go to OpenAI instead.
 #   --set judge.base_url=http://127.0.0.1:<PORT>/v1 --set judge.model_id=<MODEL>
+# and, for gpt-oss-20b, also
+#   --set judge.reasoning_effort=low --set judge.max_tokens=1024
 # HF_HOME is inherited; set HF_HUB_OFFLINE=1 to forbid downloads.
 set -uo pipefail
 

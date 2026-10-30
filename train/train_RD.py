@@ -2,7 +2,7 @@
 """RD (Rewarding Doubt) baseline: PPO on a verbalized confidence head.
 
 Port of https://github.com/pasta99/RewardingDoubt (arXiv:2503.02623); rd_util/ stays
-close to upstream. Needs the csr-rd env (trl 0.8.6 PPO API, from environment-rd.yml);
+close to upstream. Needs the csr-rd env (trl 0.8.6 PPO API, from requirements-rd.txt);
 RD *evaluation* instead runs in the main env, see evaluation/eval_verbalized.py.
 
     python train/train_RD.py --model qwen
@@ -24,12 +24,22 @@ from csr.config import (add_common_args, checkpoint_dir, dump_config, load_confi
                         seed_everything)
 
 from trl import PPOConfig
+import trl.trainer.ppo_trainer as _trl_ppo
+# unsloth >= 2025.3 (needed for Qwen3) rebinds the names inside trl.trainer.ppo_trainer
+# on import -- PPOTrainer, PPOConfig -- with compiled variants whose __init__ does not
+# run on trl 0.8.6. The PPO subclass is bound to the original class before unsloth
+# loads, and the module's names are put back afterwards; on unsloth 2025.1 nothing
+# changes and both steps are no-ops.
+_trl_ppo_names = dict(vars(_trl_ppo))
+from rd_util.ppo_trainer_no_cache import PPOTrainerNoCache
 from torch.utils.data import DataLoader
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, StoppingCriteria, StoppingCriteriaList
 from tqdm.auto import tqdm
 from rd_util.DataHelper import DataCollatorForTokenizedQueries
 from unsloth import FastLanguageModel
-from rd_util.ppo_trainer_no_cache import PPOTrainerNoCache
+for _name, _obj in _trl_ppo_names.items():
+    if vars(_trl_ppo).get(_name) is not _obj:
+        setattr(_trl_ppo, _name, _obj)
 from typing import Tuple
 
 from rd_util.DataHelper import load_prepared_dataset
@@ -61,6 +71,103 @@ def rd_dataset_name(name: str) -> str:
 
 # stop ids = EOS + the model's end-of-turn markers from its config (upstream hardcoded
 # Llama's <|eot_id|>); markers absent from this vocabulary are skipped
+class StopAtConfidence(StoppingCriteria):
+    """Stop stage 1 once the generation has written the word "Confidence".
+
+    Upstream stops on the single token " Confidence", which exists for Qwen and
+    Llama but not for Mistral, where the word always splits ("Conf" + "idence").
+    Stopping on the shared sub-token is not an option either: "idence" also ends
+    evidence, residence, incidence and Providence. So the word's final token only
+    pre-filters, and a short decoded tail confirms it.
+    """
+
+    def __init__(self, tokenizer, prompt_len: int, word: str = "Confidence", tail: int = 16):
+        self.tokenizer = tokenizer
+        self.prompt_len = prompt_len
+        self.word = word
+        self.tail = tail
+        ends = set()
+        for lead in (", ", "\n", " ", ""):
+            ids = tokenizer(lead + word, add_special_tokens=False)["input_ids"]
+            if ids:
+                ends.add(int(ids[-1]))
+        self.end_ids = torch.tensor(sorted(ends), dtype=torch.long)
+
+    def __call__(self, input_ids, scores, **kwargs):
+        done = torch.zeros(input_ids.shape[0], dtype=torch.bool, device=input_ids.device)
+        hits = torch.isin(input_ids[:, -1], self.end_ids.to(input_ids.device))
+        rows = hits.nonzero(as_tuple=True)[0]
+        if rows.numel() == 0:
+            return done
+        start = max(self.prompt_len, int(input_ids.shape[1]) - self.tail)
+        tails = self.tokenizer.batch_decode(input_ids[rows, start:], skip_special_tokens=True)
+        for row, text in zip(rows.tolist(), tails):
+            done[row] = self.word in text
+        return done
+
+class StopAfterConfidenceValue(StoppingCriteria):
+    """End the PPO continuation once the confidence value is complete.
+
+    The query already ends in "Confidence". Callers size the decoded tail to
+    include the whole continuation budget plus the query's field marker, so even
+    a long decimal cannot push the marker out. A digit run must be followed by a
+    non-digit before stopping, or "10" would be cut to "1". Qwen and Llama emit
+    their chat-end token right after the value anyway; Mistral keeps talking for
+    a few hundred tokens, which would spread the reward over the ramble.
+    """
+
+    # the decimal part must be inside the match, or "5.0" stops at "5."; a dot
+    # only terminates when what follows it is not a digit, which is how a full
+    # stop ("Confidence: 7. The answer...") is told apart from a decimal point
+    PATTERN = re.compile(r"Confidence\s*:\s*[*_`\s]*-?\d+(?:\.\d+)?(?:[^\d.]|\.[^\d])")
+
+    def __init__(self, tokenizer, tail: int = 48):
+        self.tokenizer = tokenizer
+        self.tail = tail
+
+    def __call__(self, input_ids, scores, **kwargs):
+        window = input_ids[:, -self.tail:]
+        tails = self.tokenizer.batch_decode(window, skip_special_tokens=True)
+        # A wider window can include examples in the question; only the final
+        # Confidence field is the report being continued here.
+        return torch.tensor([bool(self.PATTERN.search(tail[tail.rfind("Confidence"):])) for tail in tails],
+                            dtype=torch.bool, device=input_ids.device)
+
+
+@torch.no_grad()
+def sample_without_cache(model, tokenizer, ids, *, max_new_tokens: int, temperature: float,
+                         top_p: float, stop_ids, value_stop=None):
+    """One full forward per generated token, no KV cache.
+
+    unsloth's fast generate returns corrupted continuations for some long prompts
+    (a 1399-token hotpot_context prefix: greedy ": 1\n<|im_start|>ote" where the
+    full forward puts all its mass on ": 9<|im_end|>"); the forward itself is sound,
+    so the stage-2 value (a handful of tokens) is sampled from it directly. Same
+    semantics as generate(do_sample=True, top_k=0): softmax(logits / T), nucleus top_p.
+    """
+    seq = ids[None] if ids.dim() == 1 else ids
+    start = seq.shape[1]
+    for _ in range(int(max_new_tokens)):
+        logits = model(input_ids=seq).logits[0, -1].float()
+        if temperature <= 0:
+            nxt = int(logits.argmax())
+        else:
+            probs = torch.softmax(logits / float(temperature), dim=-1)
+            if top_p < 1.0:
+                sp, si = torch.sort(probs, descending=True)
+                keep = torch.cumsum(sp, 0) - sp < top_p
+                probs = torch.zeros_like(probs)
+                probs[si[keep]] = sp[keep]
+                probs = probs / probs.sum()
+            nxt = int(torch.multinomial(probs, 1))
+        seq = torch.cat((seq, seq.new_tensor([[nxt]])), dim=1)
+        if nxt in stop_ids:
+            break
+        if value_stop is not None and bool(value_stop(seq, None)[0]):
+            break
+    return seq[0, start:]
+
+
 def terminator_ids(tokenizer, chat_end_markers):
     ids = [tokenizer.eos_token_id]
     for marker in chat_end_markers or []:
@@ -76,7 +183,7 @@ def terminator_ids(tokenizer, chat_end_markers):
 
 
 # F1@0.5 on the datasets with free-form answers; upstream RD scores its PPO
-# reward by exact match, which is unreachable for HotpotQA-style answers.
+# reward by exact match
 def get_metric_and_threshold(dataset_name: str):
     if dataset_name in {"triviaqa", "qampari", "hotpotqa", "hotpotqa_context"}:
         return Metric.F1, 0.5
@@ -90,7 +197,8 @@ def safe_metric(metric_fn, results, metric: Metric, threshold: float = 0.5, max_
         return float("nan")
 
 
-def evaluate_subset(model, dataloader, tokenizer, generation_kwargs, device, split_name: str, metric: Metric, threshold: float):
+def evaluate_subset(model, dataloader, tokenizer, generation_kwargs, device, split_name: str, metric: Metric, threshold: float,
+                    strict: bool = False):
     rewards_epoch = []
     qa_results = []
 
@@ -106,7 +214,7 @@ def evaluate_subset(model, dataloader, tokenizer, generation_kwargs, device, spl
         responses = [prediction[i][len(input_ids[i]):] for i in range(len(prediction))]
         responses_decoded = tokenizer.batch_decode(responses, skip_special_tokens=True)
 
-        results = [response_to_QAResult(question, response, gt, is_mc) for question, response, gt, is_mc in zip(questions, responses_decoded, gt_candidates, is_multiple_choice)]
+        results = [response_to_QAResult(question, response, gt, is_mc, strict=strict) for question, response, gt, is_mc in zip(questions, responses_decoded, gt_candidates, is_multiple_choice)]
         rewards = [QAResult_to_reward(r, metric=metric, threshold=threshold) for r in results]
         rewards_epoch += rewards
         qa_results += results
@@ -183,6 +291,13 @@ def save_training_state(ppo_trainer, out_dir: str, global_step: int, epoch_idx: 
         "best_reward": float(best_reward),
         "best_reward_step": int(best_reward_step),
         "rng_state": _capture_rng_state(),
+        # the fast-forward and the step numbering both divide by this, so a resume
+        # with a different batch_size or max_train_samples has to be refused
+        "batches_per_epoch": int(len(ppo_trainer.dataloader)),
+        # what the run was trained under, checked on resume, and the adaptive KL
+        # coefficient, which would otherwise restart at init_kl_coef
+        "train_flags": dict(getattr(ppo_trainer, "rd_train_flags", {}) or {}),
+        "kl_coef": float(ppo_trainer.kl_ctl.value),
     }
     if getattr(ppo_trainer, "optimizer", None) is not None:
         state["optimizer"] = ppo_trainer.optimizer.state_dict()
@@ -205,34 +320,85 @@ def save_training_state(ppo_trainer, out_dir: str, global_step: int, epoch_idx: 
     return latest_path, step_path, ckpt_state_path
 
 
-def maybe_load_training_state(ppo_trainer, out_dir: str, resume_state_path: str | None = None, resume_auto: bool = False):
-    cand = None
+# the adapter and the value head have to be in place before the model is built, so
+# the state file is located before the load and read again after
+def resolve_resume(out_dir: str, resume_state_path: str | None = None, resume_auto: bool = False):
     if resume_state_path:
         cand = resume_state_path
     elif resume_auto:
-        auto_path = os.path.join(out_dir, "training_state_latest.pt")
-        if os.path.exists(auto_path):
-            cand = auto_path
-    if not cand:
-        return 0, 0, -100.0, -1
+        cand = os.path.join(out_dir, "training_state_latest.pt")
+    else:
+        return None, None
     if not os.path.exists(cand):
-        print(f"[Resume] state file not found, skip: {cand}")
+        print(f"[Resume] no state file at {cand}, starting fresh", flush=True)
+        return None, None
+
+    state = torch.load(cand, map_location="cpu", weights_only=False)
+    if "batches_per_epoch" not in state:
+        raise SystemExit(
+            f"{cand} predates the resume fix: it has no batches_per_epoch, and runs "
+            "written then never reloaded their adapter, so the step it claims is not "
+            "the step its weights are at. Start the run over."
+        )
+    step = int(state["global_step"])
+    # a state saved inside a checkpoint directory names its own adapter
+    if os.path.basename(cand) == "training_state.pt":
+        adapter_dir = os.path.dirname(cand)
+    else:
+        adapter_dir = os.path.join(out_dir, f"model_finetuned_step_{step}")
+    if not os.path.isdir(adapter_dir):
+        raise SystemExit(
+            f"{cand} is at step {step} but {adapter_dir} does not exist, so that "
+            "step's adapter cannot be reloaded"
+        )
+    return cand, adapter_dir
+
+
+def maybe_load_training_state(ppo_trainer, state_path: str | None):
+    if not state_path:
         return 0, 0, -100.0, -1
 
-    state = torch.load(cand, map_location="cpu")
+    state = torch.load(state_path, map_location="cpu", weights_only=False)
+    batches = len(ppo_trainer.dataloader)
+    saved_batches = int(state["batches_per_epoch"])
+    if saved_batches != batches:
+        raise SystemExit(
+            f"{state_path} was written with {saved_batches} batches per epoch but this "
+            f"run has {batches}; batch_size and max_train_samples must match to resume"
+        )
+    saved_flags = state.get("train_flags")
+    flags = dict(getattr(ppo_trainer, "rd_train_flags", {}) or {})
+    if saved_flags is not None:
+        # states written while the removed freeze_stage1 option existed recorded it as False
+        saved_flags = {k: v for k, v in saved_flags.items() if k != "freeze_stage1"}
+    if saved_flags is None:
+        print(f"[Resume] WARNING: {state_path} has no train_flags; cannot check that "
+              f"this resume trains under the same settings: {flags}", flush=True)
+    elif saved_flags != flags:
+        diff = {k: (saved_flags.get(k), flags.get(k))
+                for k in sorted(set(saved_flags) | set(flags)) if saved_flags.get(k) != flags.get(k)}
+        raise SystemExit(f"{state_path} was trained under different settings "
+                         f"(saved, now): {diff}; pass the same --set flags to resume")
+    if "kl_coef" in state:
+        ppo_trainer.kl_ctl.value = float(state["kl_coef"])
+        print(f"[Resume] kl_coef={ppo_trainer.kl_ctl.value:.6f}", flush=True)
     if "optimizer" in state and getattr(ppo_trainer, "optimizer", None) is not None:
         ppo_trainer.optimizer.load_state_dict(state["optimizer"])
     if "lr_scheduler" in state and getattr(ppo_trainer, "lr_scheduler", None) is not None:
         ppo_trainer.lr_scheduler.load_state_dict(state["lr_scheduler"])
     _restore_rng_state(state.get("rng_state"))
 
-    start_global_step = int(state.get("global_step", 0))
-    start_epoch_idx = int(state.get("epoch_idx", 0))
+    start_global_step = int(state["global_step"])
+    # derived, not read back: global_step is absolute, and the saved epoch_idx is the
+    # epoch that produced the step, which is the previous one on an epoch boundary
+    start_epoch_idx = start_global_step // batches
+    skip = start_global_step % batches
     best_reward = float(state.get("best_reward", -100.0))
     best_reward_step = int(state.get("best_reward_step", -1))
-    print(f"[Resume] loaded trainer state <- {cand}")
-    print(f"[Resume] start_global_step={start_global_step} start_epoch_idx={start_epoch_idx}")
-    return start_global_step, start_epoch_idx, best_reward, best_reward_step
+    print(f"[Resume] state <- {state_path}", flush=True)
+    print(f"[Resume] global_step={start_global_step} epoch={start_epoch_idx} "
+          f"skip={skip}/{batches}", flush=True)
+    return start_epoch_idx, skip, best_reward, best_reward_step
 
 
 def summarize_reward_batch(results, responses_decoded, rewards, metric: Metric, threshold: float):
@@ -249,6 +415,7 @@ def summarize_reward_batch(results, responses_decoded, rewards, metric: Metric, 
             "examples_parse_fail": [],
             "examples_conf_out_of_range": [],
             "examples_long_digit_conf": [],
+            "conf_values": [],
         }
 
     parse_fail = 0
@@ -260,6 +427,7 @@ def summarize_reward_batch(results, responses_decoded, rewards, metric: Metric, 
     examples_parse_fail = []
     examples_conf_out_of_range = []
     examples_long_digit_conf = []
+    conf_values = []
 
     for idx, (res, resp_text, rew) in enumerate(zip(results, responses_decoded, rewards)):
         text = str(resp_text or "")
@@ -269,6 +437,7 @@ def summarize_reward_batch(results, responses_decoded, rewards, metric: Metric, 
                 examples_parse_fail.append((idx, text[:220].replace("\n", "\\n")))
 
         conf = res.confidence
+        conf_values.append(conf)
         if conf is None:
             conf_none += 1
         elif conf < 0 or conf > 10:
@@ -298,22 +467,34 @@ def summarize_reward_batch(results, responses_decoded, rewards, metric: Metric, 
         "examples_parse_fail": examples_parse_fail,
         "examples_conf_out_of_range": examples_conf_out_of_range,
         "examples_long_digit_conf": examples_long_digit_conf,
+        # the collapse to a constant confidence is only visible here
+        "conf_values": conf_values,
     }
 
 
 def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, tokenizer_dir: str, dataset: str, log_with: str = "tensorboard", is_unsloth: bool = True, use_lora: bool = True, max_train_samples: int = 10000, max_validation_samples: int = 1000, reward_log_interval: int = 10, shuffle_seed: int = 42, eval_every_steps: int = 0, save_every_steps: int = 250, max_eval_train_samples: int = 1000, debug_sample_log_interval: int = 100, resume_state_path: str | None = None, resume_auto: bool = False,
           chat_end_markers=(), max_seq_length: int = 1048,
           use_exact_model_name: bool = True, ppo_max_new_tokens: int = 500,
+          ppo_temperature: float | None = None, ppo_repetition_penalty: float | None = 1.0,
           rollout_max_new_tokens: int = 256, rollout_temperature: float = 0.6,
-          rollout_top_p: float = 0.9) -> None:
+          rollout_top_p: float = 0.9, chat_template_kwargs=None, lora=None,
+          system_prompt: str | None = None, confidence_stop: bool = False,
+          kl_horizon: int = 10000, max_grad_norm: float | None = None,
+          strict_format: bool = False,
+          ppo_early_stopping: bool = False, ppo_target_kl: float = 1.0,
+          ppo_mini_batch_size: int | None = None, ppo_gradient_accumulation_steps: int = 1,
+          unpadded_generation: bool = False) -> None:
     os.makedirs(out_dir, exist_ok=True)
-
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    resume_path, adapter_dir = resolve_resume(out_dir, resume_state_path, resume_auto)
     if use_lora:
         model, tokenizer = load_lora_model_tokenizer(
             model_dir, is_unsloth, device, max_seq_length=max_seq_length,
-            use_exact_model_name=use_exact_model_name)
+            use_exact_model_name=use_exact_model_name, lora=lora,
+            adapter_dir=adapter_dir)
     else:
+        if adapter_dir:
+            raise SystemExit("resume needs use_lora: true; there is no adapter to reload")
         model, tokenizer = load_model_tokenizer(
             model_dir, is_unsloth, device, max_seq_length=max_seq_length,
             use_exact_model_name=use_exact_model_name)
@@ -324,12 +505,16 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
     model.padding_side = "left"
     reward_metric, reward_threshold = get_metric_and_threshold(dataset)
 
-    dataset_train = load_prepared_dataset(dataset, "train", "verbalize", tokenizer)
+    dataset_train = load_prepared_dataset(dataset, "train", "verbalize", tokenizer,
+                                          template_kwargs=chat_template_kwargs,
+                                          system_prompt=system_prompt)
     dataset_train = shuffle_and_limit_dataset(dataset_train, max_train_samples, shuffle_seed)
     print(f"Training samples: {len(dataset_train)}")
     dataset_train_eval = shuffle_and_limit_dataset(dataset_train, max_eval_train_samples, shuffle_seed)
     print(f"Train-eval samples: {len(dataset_train_eval)}")
-    dataset_validation = load_prepared_dataset(dataset, "validation", "verbalize", tokenizer)
+    dataset_validation = load_prepared_dataset(dataset, "validation", "verbalize", tokenizer,
+                                               template_kwargs=chat_template_kwargs,
+                                               system_prompt=system_prompt)
     dataset_validation = shuffle_and_limit_dataset(dataset_validation, max_validation_samples, shuffle_seed)
     print(f"Validation samples: {len(dataset_validation)}")
 
@@ -348,12 +533,21 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
         learning_rate=lr,
         task_name="gpt",
         batch_size=batchsize,
-        mini_batch_size=int(batchsize / 2),
+        # mini_batch_size * gradient_accumulation_steps samples go into each optimizer
+        # step; the default (batch/2, 1) is upstream. Halving the mini-batch and doubling
+        # the accumulation keeps that product, so the update is unchanged at half the
+        # activation memory (needed for the 32B on a 46 GB card).
+        mini_batch_size=int(ppo_mini_batch_size) if ppo_mini_batch_size else int(batchsize / 2),
+        gradient_accumulation_steps=int(ppo_gradient_accumulation_steps),
         log_with=log_with,
         project_kwargs={"logging_dir": out_dir},
         remove_unused_columns=False,
         optimize_device_cache=True,
         init_kl_coef=0.05,
+        horizon=int(kl_horizon),
+        max_grad_norm=max_grad_norm,
+        early_stopping=ppo_early_stopping,
+        target_kl=ppo_target_kl,
     )
 
     ppo_trainer = PPOTrainerNoCache(
@@ -363,8 +557,32 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
         tokenizer=tokenizer,
         data_collator=data_collator,
     )
+    ppo_trainer.rd_train_flags = {
+        "lr": float(lr), "confidence_stop": bool(confidence_stop),
+        "strict_format": bool(strict_format),
+        "ppo_early_stopping": bool(ppo_early_stopping), "ppo_target_kl": float(ppo_target_kl),
+        "kl_horizon": int(kl_horizon), "max_grad_norm": max_grad_norm,
+        "ppo_temperature": ppo_temperature, "ppo_repetition_penalty": ppo_repetition_penalty,
+        "ppo_mini_batch_size": int(ppo_mini_batch_size) if ppo_mini_batch_size else int(batchsize / 2),
+        "ppo_gradient_accumulation_steps": int(ppo_gradient_accumulation_steps),
+        "unpadded_generation": bool(unpadded_generation),
+        "batch_size": int(batchsize), "epochs": int(epochs),
+        "lora_rank": int((lora or {}).get("rank", 32)), "lora_alpha": int((lora or {}).get("alpha", 32)),
+    }
 
-    prediction_terminators = terminator_ids(tokenizer, chat_end_markers)
+    # upstream also stops stage 1 at " Confidence", so the PPO response is the
+    # confidence itself
+    prediction_markers = list(chat_end_markers or [])
+    if confidence_stop:
+        prediction_markers.append("\u0120Confidence")
+    prediction_terminators = terminator_ids(tokenizer, prediction_markers)
+    # the token id only covers a space-led " Confidence"; "\nConfidence" splits into
+    # "Conf"+"idence" and would slip through, so the decoded word backs it up for every
+    # model. Mistral has no such token at all and relies on the word alone.
+    word_stop = confidence_stop
+    if confidence_stop:
+        print(f"[train] confidence_stop terminators={prediction_terminators} "
+              f"word_stop={word_stop}", flush=True)
 
     ppo_terminators = terminator_ids(tokenizer, chat_end_markers)
 
@@ -386,6 +604,16 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
         "max_new_tokens": int(ppo_max_new_tokens),
         "eos_token_id": ppo_terminators,
     }
+    # upstream leaves the temperature to each model's generation_config (qwen 0.7,
+    # llama 0.6, mistral 1.0) while PPO scores the samples at 1.0; None keeps that
+    if ppo_temperature is not None:
+        generation_kwargs_ppo["temperature"] = float(ppo_temperature)
+    if ppo_repetition_penalty is not None:
+        generation_kwargs_ppo["repetition_penalty"] = float(ppo_repetition_penalty)
+    value_stop = StopAfterConfidenceValue(tokenizer, tail=int(ppo_max_new_tokens) + 48)
+    ppo_end_ids = set(ppo_terminators) - {tokenizer.eos_token_id}
+    if confidence_stop:
+        generation_kwargs_ppo["stopping_criteria"] = StoppingCriteriaList([value_stop])
 
     eval_terminators = terminator_ids(tokenizer, chat_end_markers)
 
@@ -398,16 +626,14 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
         "pad_token_id": tokenizer.eos_token_id
     }
 
-    start_global_step, start_epoch_idx, best_reward, best_reward_step = maybe_load_training_state(
-        ppo_trainer=ppo_trainer,
-        out_dir=out_dir,
-        resume_state_path=resume_state_path,
-        resume_auto=resume_auto,
+    start_epoch_idx, resume_skip, best_reward, best_reward_step = (
+        maybe_load_training_state(ppo_trainer, resume_path)
     )
     csv_path = os.path.join(out_dir, "eval_metrics.csv")
 
 
-    for epoch in range(start_epoch_idx, start_epoch_idx + epochs):
+    # start_epoch_idx is absolute, so epochs is the total, not the number still to run
+    for epoch in range(start_epoch_idx, epochs):
         rewards_epoch = []
         epoch_debug_acc = {
             "total": 0,
@@ -423,7 +649,15 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
             total=len(ppo_trainer.dataloader),
             desc=f"Epoch {epoch + 1}/{epochs}",
         )
+        # the iterator restarts at 0 on resume while global_step carries on, so skip
+        # what this epoch already consumed. TRL reshuffles on every __iter__, so the
+        # remaining order is not the one the interrupted run would have seen.
+        skip = resume_skip if epoch == start_epoch_idx else 0
+        if skip:
+            print(f"[Resume] skipping {skip} batches already consumed this epoch", flush=True)
         for idx, batch in progress_bar:
+            if idx < skip:
+                continue
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             gt_candidates = batch["gt_candidates"]
@@ -435,21 +669,74 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
             else:
                 model.eval()
 
-            prediction = model.generate(input_ids=input_ids, attention_mask=attention_mask, **generation_kwargs_prediction)
-            prediction = [remove_padding(p, tokenizer.pad_token_id) for p in prediction]
+            # the PPO query is prompt + stage-1 output, so the split is after the
+            # answer, as upstream does
+            prediction_stop = (
+                StoppingCriteriaList([StopAtConfidence(tokenizer, int(input_ids.shape[1]))])
+                if word_stop else None)
+            if unpadded_generation:
+                # one prompt at a time, no pad tokens anywhere: on prompts of ~1-2k
+                # tokens (hotpot_context) unsloth's batched inference returns garbage
+                # for the left-padded rows ("Answer,000000 and,1000..."), while the
+                # same prompts generate normally on their own
+                prediction = []
+                for i in range(len(input_ids)):
+                    row = input_ids[i][attention_mask[i].bool()][None]
+                    stop_i = (StoppingCriteriaList([StopAtConfidence(tokenizer, int(row.shape[1]))])
+                              if word_stop else None)
+                    out = model.generate(input_ids=row, attention_mask=torch.ones_like(row),
+                                         stopping_criteria=stop_i, **generation_kwargs_prediction)
+                    prediction.append(remove_padding(out[0], tokenizer.pad_token_id))
+            else:
+                prediction = model.generate(input_ids=input_ids, attention_mask=attention_mask,
+                                            stopping_criteria=prediction_stop,
+                                            **generation_kwargs_prediction)
+                prediction = [remove_padding(p, tokenizer.pad_token_id) for p in prediction]
+            # the collator's left pads were masked out of stage 1 but TRL would hand
+            # them to stage 2 and to the PPO forward with mask 1, so the policy would
+            # be trained on, and could key its confidence to, a run of pad tokens no
+            # prompt has at inference (upstream shares this); strip them by the mask
+            prompt_lens = [int(attention_mask[i].sum()) for i in range(len(prediction))]
+            if not unpadded_generation:
+                prediction = [p[int(input_ids.shape[1]) - n:] for p, n in zip(prediction, prompt_lens)]
 
             if not is_unsloth:
                 model.train()
-            response_tensors = ppo_trainer.generate(prediction, return_prompt=False, **generation_kwargs_ppo)
+            if unpadded_generation:
+                # stage 2 off the KV cache as well (see sample_without_cache)
+                response_tensors = [
+                    sample_without_cache(
+                        model.pretrained_model if hasattr(model, "pretrained_model") else model,
+                        tokenizer, p, max_new_tokens=int(ppo_max_new_tokens),
+                        temperature=float(ppo_temperature) if ppo_temperature is not None else 1.0,
+                        top_p=1.0, stop_ids=set(ppo_terminators),
+                        value_stop=value_stop if confidence_stop else None)
+                    for p in prediction]
+            else:
+                response_tensors = ppo_trainer.generate(prediction, return_prompt=False,
+                                                        **generation_kwargs_ppo)
+            if confidence_stop and not unpadded_generation:
+                # TRL cuts each row at its first eos and keeps it. A row the value
+                # criterion or a non-eos terminator ended early was right-padded with
+                # pad == eos, so that eos was never sampled, yet it would carry the score
+                response_tensors = [
+                    r[:-1] if (len(r) > 1 and int(r[-1]) == tokenizer.eos_token_id and (
+                        int(r[-2]) in ppo_end_ids
+                        or bool(value_stop(torch.cat((p, r[:-1]))[None], None)[0])))
+                    else r
+                    for p, r in zip(prediction, response_tensors)]
 
             total_tensor = [torch.cat((p, c), 0) for p, c in zip(prediction, response_tensors)]
-            answer_only_tensor = [total_tensor[i][len(input_ids[i]):] for i in range(len(input_ids))]
+            answer_only_tensor = [total_tensor[i][prompt_lens[i]:] for i in range(len(input_ids))]
             responses_decoded = tokenizer.batch_decode(answer_only_tensor, skip_special_tokens=True)
+            query_tensors = prediction
 
-            results = [response_to_QAResult(question, response, gt, is_mc) for question, response, gt, is_mc in zip(questions, responses_decoded, gt_candidates, is_multiple_choice)]
+            results = [response_to_QAResult(question, response, gt, is_mc, strict=strict_format) for question, response, gt, is_mc in zip(questions, responses_decoded, gt_candidates, is_multiple_choice)]
             rewards = [QAResult_to_reward(r, metric=reward_metric, threshold=reward_threshold) for r in results]
             rewards_epoch += rewards
             batch_debug = summarize_reward_batch(results, responses_decoded, rewards, reward_metric, reward_threshold)
+            # diagnostic only: how long the PPO continuation ran
+            ppo_resp_lens = [int(r.shape[0]) for r in response_tensors]
             for k in epoch_debug_acc.keys():
                 epoch_debug_acc[k] += int(batch_debug[k])
             batch_reward = float(np.mean(rewards))
@@ -461,7 +748,7 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
             try:
                 if is_unsloth:
                     FastLanguageModel.for_training(model.pretrained_model)
-                stats = ppo_trainer.step(prediction, response_tensors, rewards)
+                stats = ppo_trainer.step(query_tensors, response_tensors, rewards)
             except IndexError:
                 print(f"INDEX ERROR detected and ignored ({idx})")
                 continue
@@ -480,7 +767,9 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
                     f"[RewardDebug][batch] parse_fail={batch_debug['parse_fail']}/{bt} "
                     f"conf_none={batch_debug['conf_none']}/{bt} conf_out_of_range={batch_debug['conf_out_of_range']}/{bt} "
                     f"correct={batch_debug['correct']}/{bt} floor_hits={batch_debug['reward_floor_hits']}/{bt} "
-                    f"long_digit_conf={batch_debug['long_digit_conf_pattern']}/{bt}"
+                    f"long_digit_conf={batch_debug['long_digit_conf_pattern']}/{bt} "
+                    f"ppo_resp_len mean={float(np.mean(ppo_resp_lens)):.1f} max={max(ppo_resp_lens)} "
+                    f"conf={[('-' if c is None else c) for c in batch_debug['conf_values']]}"
                 )
                 print(
                     f"[RewardDebug][epoch_acc] parse_fail={epoch_debug_acc['parse_fail']}/{et} "
@@ -502,8 +791,8 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
                         for ex_idx, ex_txt in batch_debug["examples_long_digit_conf"]:
                             print(f"  - sample#{ex_idx}: {ex_txt}")
 
-            local_step = (epoch - start_epoch_idx) * len(ppo_trainer.dataloader) + (idx + 1)
-            global_step = start_global_step + local_step
+            # absolute: with the fast-forward above, (epoch, idx) fixes the step
+            global_step = epoch * len(ppo_trainer.dataloader) + idx + 1
             # checkpoints are written regardless of eval; model_finetuned_best needs eval on
             if save_every_steps > 0 and (global_step % save_every_steps == 0):
                 step_ckpt_dir = os.path.join(out_dir, f"model_finetuned_step_{global_step}")
@@ -533,6 +822,7 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
                     "train",
                     reward_metric,
                     reward_threshold,
+                    strict=strict_format,
                 )
                 val_metrics = evaluate_subset(
                     model,
@@ -543,6 +833,7 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
                     "validation",
                     reward_metric,
                     reward_threshold,
+                    strict=strict_format,
                 )
                 append_eval_metrics(
                     csv_path,
@@ -650,9 +941,27 @@ def main():
         max_seq_length=int(train_cfg["max_seq_length"]),
         use_exact_model_name=bool(cfg["model"].get("use_exact_model_name", True)),
         ppo_max_new_tokens=int(train_cfg["ppo_max_new_tokens"]),
+        ppo_temperature=(float(train_cfg["ppo_temperature"])
+                         if train_cfg.get("ppo_temperature") is not None else None),
+        ppo_repetition_penalty=(float(train_cfg.get("ppo_repetition_penalty", 1.0))
+                                if train_cfg.get("ppo_repetition_penalty", 1.0) is not None else None),
         rollout_max_new_tokens=int(train_cfg["rollout_max_new_tokens"]),
         rollout_temperature=float(train_cfg["rollout_temperature"]),
         rollout_top_p=float(train_cfg["rollout_top_p"]),
+        chat_template_kwargs=cfg["model"].get("chat_template_kwargs") or {},
+        lora=cfg["model"].get("lora") or {},
+        system_prompt=cfg["method"]["system_prompt"],
+        confidence_stop=bool(train_cfg.get("confidence_stop", False)),
+        kl_horizon=int(train_cfg.get("kl_horizon", 10000)),
+        max_grad_norm=(float(train_cfg["max_grad_norm"])
+                       if train_cfg.get("max_grad_norm") is not None else None),
+        strict_format=bool(train_cfg.get("strict_format", False)),
+        ppo_early_stopping=bool(train_cfg.get("ppo_early_stopping", False)),
+        ppo_target_kl=float(train_cfg.get("ppo_target_kl", 1.0)),
+        ppo_mini_batch_size=(int(train_cfg["ppo_mini_batch_size"])
+                             if train_cfg.get("ppo_mini_batch_size") is not None else None),
+        ppo_gradient_accumulation_steps=int(train_cfg.get("ppo_gradient_accumulation_steps", 1)),
+        unpadded_generation=bool(train_cfg.get("unpadded_generation", False)),
     )
 
 

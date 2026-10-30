@@ -4,7 +4,7 @@ A plain transformers forward pass, not vLLM: vLLM 0.11.2's ``prompt_logprobs``
 path crashes for Llama-3.1-8B and Mistral-7B under LoRA. Writes
 ``logprobs_hf.json``, which aggregation.py and estimators.py read.
 
-    python analysis/logprobs_hf.py --model llama8b --method Base \
+    python analysis/logprobs_hf.py --model llama --method Base \
         --datasets hotpot trivia msmarco nq_open
 """
 
@@ -29,7 +29,8 @@ EXP = {
     "RLVR": "RLVR_{m}_{d}_step2500_oss_k16",
     "CSR": "CSR_{m}_{d}_z10_step2500_oss_k16",
 }
-MODELS = ["llama8b", "qwen7b", "mistral7b"]   # results/ and ckpt/ share these names
+# --model takes the config key; results/ and ckpt/ use the yaml's ckpt_name
+from csr.config import MODELS
 
 
 def load_hf_policy(cfg, adapter: str | None, load_in_4bit: bool):
@@ -99,7 +100,7 @@ def score_batch(model, tokenizer, pairs, device="cuda:0"):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--model", default="qwen7b", choices=MODELS)
+    parser.add_argument("--model", default="qwen", choices=MODELS)
     parser.add_argument("--method", default="CSR", choices=list(EXP))
     parser.add_argument("--datasets", nargs="+",
                         default=["hotpot", "trivia", "msmarco", "nq_open"])
@@ -117,19 +118,20 @@ def main() -> None:
 
     model = tokenizer = None
     for ds in args.datasets:
-        exp = EXP[args.method].format(m=args.model, d=ds)
+        cfg = load_config(args.method if args.method != "Base" else "Base",
+                          args.model, ds, [])
+        name = cfg["model"]["ckpt_name"]          # results/ and ckpt/ directory name
+        exp = EXP[args.method].format(m=name, d=ds)
         run_dir = RESULTS / exp
         payload = json.loads((run_dir / "results.json").read_text())
         if payload.get("status") != "final":
             print(f"[skip] {exp}: not final"); continue
         records = payload["records"][: args.limit]
 
-        cfg = load_config(args.method if args.method != "Base" else "Base",
-                          args.model, ds, [])
         if model is None:
             ckpt = args.ckpt or CKPT[args.method]
-            adapter = (str(ROOT / ckpt.format(m=args.model,
-                                              model=args.model)) if ckpt else None)
+            adapter = (str(ROOT / ckpt.format(m=name, model=name))
+                       if ckpt else None)
             use_4bit = bool(cfg["model"].get("load_in_4bit", True))
             model, tokenizer = load_hf_policy(cfg, adapter, use_4bit)
 

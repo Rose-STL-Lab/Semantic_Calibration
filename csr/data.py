@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 from functools import partial
 
 from datasets import load_dataset
@@ -55,15 +56,30 @@ _RLCR_REMINDER = (
 )
 
 
-def _format_hotpot_context_rlcr(example) -> str:
-    # the passages in RLCR's own layout: "Paragraph <i>" blocks under rules
-    ctx = example.get("context", {}) or {}
+def _rlcr_passages(bodies) -> str:
+    # the passages in RLCR's own layout: numbered "Paragraph <i>" blocks, no titles,
+    # separator rules between them -- byte-identical to _build_hotpot_problem in
+    # RLCR/hotpot_context/rlcr_unsloth_hotpot_aligned_10k_1epoch_*.py
     sections = []
-    for idx, sentences in enumerate(ctx.get("sentences", []) or []):
-        body = "\n".join(sentences or [])
+    for idx, body in enumerate(bodies):
         sections.append(f"Paragraph {idx} \n\n {body} \n\n")
         sections.append("--------------------------------\n\n")
     return "".join(sections)
+
+
+def _rlcr_problem(system_prompt, user_template, bodies, question):
+    # RLCR trains on "Question / reminder / Supporting Information"; any context
+    # dataset must use this layout or the checkpoint sees an unseen prompt format
+    problem = (f"Question: {question} \n\n"
+               f"{_RLCR_REMINDER} \n\n"
+               f"Supporting Information: {_rlcr_passages(bodies)} \n\n")
+    return _messages(system_prompt, problem, user_template)
+
+
+def _format_hotpot_context_rlcr(example) -> str:
+    ctx = example.get("context", {}) or {}
+    return _rlcr_passages("\n".join(s or [])
+                          for s in (ctx.get("sentences", []) or []))
 
 
 def _hotpot_context(example, system_prompt, user_template, method: str = "CSR"):
@@ -140,16 +156,126 @@ def _nq_open(example, system_prompt, user_template):
     }
 
 
+def _simpleqa(example, system_prompt, user_template):
+    question = example["problem"]
+    meta = example.get("metadata") or {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta.replace("'", '"'))
+        except json.JSONDecodeError:
+            meta = {}
+    return {
+        "prompt": _messages(system_prompt, question, user_template),
+        "question": question,
+        "answer": str(example.get("answer", "")),
+        "meta": {
+            "topic": meta.get("topic", ""),
+            "answer_type": meta.get("answer_type", ""),
+        },
+    }
+
+
+def _context_prompt(system_prompt, user_template, context: str, question: str):
+    # the layout hotpot_context trains on, so an OOD prompt differs only in content
+    if not context:
+        return _messages(system_prompt, question, user_template)
+    return _messages(system_prompt, f"Context:\n{context}\n\nQuestion: {question}")
+
+
+def _musique(example, system_prompt, user_template, method: str = "CSR"):
+    question = example["question"]
+    blocks, bodies = [], []
+    for para in example.get("paragraphs") or []:
+        title = (para.get("title") or "").strip()
+        body = (para.get("paragraph_text") or "").strip()
+        if title or body:
+            blocks.append(f"Title: {title}\n{body}")
+            bodies.append(body)
+    aliases = [a for a in (example.get("answer_aliases") or []) if str(a).strip()]
+    gold = [str(example.get("answer", ""))] + [str(a) for a in aliases]
+    prompt = (_rlcr_problem(system_prompt, user_template, bodies, question)
+              if method == "RLCR" else
+              _context_prompt(system_prompt, user_template, "\n\n".join(blocks), question))
+    return {
+        "prompt": prompt,
+        "question": question,
+        "answer": [g for g in gold if g.strip()],
+        "meta": {
+            "id": example.get("id", ""),
+            # always True in dgslibisey/MuSiQue; the unanswerable twins live in
+            # the Full release (bdsaglam/musique), which this config does not use
+            "answerable": example.get("answerable"),
+            "hops": str(example.get("id", "")).split("hop")[0],
+        },
+    }
+
+
+def _msmarco_context(example, system_prompt, user_template, method: str = "CSR"):
+    # the same queries and golds as _msmarco, with the passages MSMARCO ships
+    record = _msmarco(example, system_prompt, user_template)
+    passages = example.get("passages") or {}
+    texts = passages.get("passage_text") or []
+    blocks, bodies = [], []
+    for i, text in enumerate(texts):
+        body = clean_unicode_text(text).strip()
+        if body:
+            blocks.append(f"Title: Passage {i + 1}\n{body}")
+            bodies.append(body)
+    record["prompt"] = (
+        _rlcr_problem(system_prompt, user_template, bodies, record["question"])
+        if method == "RLCR" else
+        _context_prompt(system_prompt, user_template, "\n\n".join(blocks), record["question"]))
+    record["meta"]["num_passages"] = len(blocks)
+    return record
+
+
+def _twowiki(example, system_prompt, user_template, method: str = "CSR"):
+    # 2WikiMultihopQA ships HotpotQA's layout with `content` where hotpot has
+    # `sentences`; the mirror's extra `questions` fields are a GPT-3.5 augmentation
+    # and are ignored.
+    question = example["question"]
+    ctx = example.get("context", {}) or {}
+    blocks, bodies = [], []
+    for title, sentences in zip(ctx.get("title", []) or [], ctx.get("content", []) or []):
+        body = " ".join(str(x).strip() for x in (sentences or []) if x)
+        if title or body:
+            blocks.append(f"Title: {title}\n{body}")
+            bodies.append(body)
+    prompt = (_rlcr_problem(system_prompt, user_template, bodies, question)
+              if method == "RLCR" else
+              _context_prompt(system_prompt, user_template, "\n\n".join(blocks), question))
+    return {
+        "prompt": prompt,
+        "question": question,
+        "answer": str(example.get("answer", "")),
+        "meta": {
+            "id": example.get("_id", ""),
+            # compositional | bridge_comparison | comparison | inference
+            "type": example.get("type", ""),
+        },
+    }
+
+
 BUILDERS = {
     "hotpot": _hotpot,
     "hotpot_context": _hotpot_context,
     "trivia": _trivia,
     "msmarco": _msmarco,
     "nq_open": _nq_open,
+    "simpleqa": _simpleqa,
+    "musique": _musique,
+    "msmarco_context": _msmarco_context,
+    "2wiki": _twowiki,
+    "2wiki_comp": _twowiki,
+    "2wiki_inf": _twowiki,
 }
 
+# builders whose prompt depends on the method (RD/RLCR keep their own layouts)
+METHOD_AWARE_BUILDERS = {"hotpot_context", "musique", "msmarco_context",
+                         "2wiki", "2wiki_comp", "2wiki_inf"}
+
 # MSMARCO has rows with no usable gold; unscorable
-REQUIRES_NONEMPTY_GOLD = {"msmarco"}
+REQUIRES_NONEMPTY_GOLD = {"msmarco", "msmarco_context"}
 
 
 def _resolve_split(raw, requested: str) -> str:
@@ -192,8 +318,9 @@ def load_split(cfg, split: str = "eval", size: int | None = None):
         print(f"[data] split {requested!r} unavailable, using {split_name!r}")
 
     builder = BUILDERS[name]
-    if name == "hotpot_context":
-        builder = partial(_hotpot_context, method=method_name)
+    # RLCR gets its own layout on every context dataset; RD only on hotpot_context
+    if name in METHOD_AWARE_BUILDERS:
+        builder = partial(builder, method=method_name)
     dataset = raw[split_name].map(
         lambda ex: builder(ex, system_prompt, user_template),
         remove_columns=raw[split_name].column_names,
@@ -202,7 +329,26 @@ def load_split(cfg, split: str = "eval", size: int | None = None):
     if name in REQUIRES_NONEMPTY_GOLD:
         dataset = dataset.filter(lambda ex: isinstance(ex["answer"], list) and len(ex["answer"]) > 0)
 
+    # 2WikiMultihopQA's comparison and bridge_comparison questions are answerable
+    # without the passages: the gold is yes/no or one of the two entities already
+    # named in the question. keep_types drops them.
+    keep = ds_cfg.get("keep_types")
+    if keep:
+        keep = set(keep)
+        before = len(dataset)
+        dataset = dataset.filter(lambda ex: ex["meta"].get("type") in keep)
+        print(f"[data] {name}: kept {len(dataset)}/{before} rows of types {sorted(keep)}")
+
     dataset = dataset.shuffle(seed=int(cfg.get("seed", 42)))
+
+    # SimpleQA ships one split, so _resolve_split would hand train and eval the
+    # same rows. Carve them disjointly: eval takes the head, train the tail.
+    if ds_cfg.get("single_split"):
+        head = int(ds_cfg["eval_size"])
+        if split == "train":
+            dataset = dataset.select(range(min(head, len(dataset)), len(dataset)))
+        else:
+            dataset = dataset.select(range(0, min(head, len(dataset))))
 
     if size is None:
         size = ds_cfg["train_size"] if split == "train" else ds_cfg["eval_size"]

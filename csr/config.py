@@ -14,8 +14,9 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_ROOT = os.path.join(REPO_ROOT, "configs")
 
 METHODS = ["Base", "RLVR", "CSR", "RD", "RLCR"]
-MODELS = ["llama", "qwen", "mistral", "qwen14b"]
-DATASETS = ["hotpot", "hotpot_context", "trivia", "msmarco", "nq_open"]
+MODELS = ["llama", "qwen", "mistral", "qwen14b", "qwen32b"]
+DATASETS = ["hotpot", "hotpot_context", "trivia", "msmarco", "nq_open",
+            "musique", "2wiki_comp"]
 
 
 def _read_yaml(path: str) -> dict:

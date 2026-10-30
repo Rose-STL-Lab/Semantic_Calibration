@@ -15,6 +15,18 @@ model:
 
   verbalized_separators: [",", ";", ":", ".", "\n"]
 
+  # Qwen3 is a reasoning model and thinks by default. Left on, a rollout is a
+  # ~1000-character chain of thought that the Answer:-based extractor returns
+  # whole, so the semantic clustering compares reasoning traces instead of
+  # answers, and at max_new_tokens=256 most rollouts are cut off before the
+  # trace ends and contain no answer at all (measured: 100% carry <think>,
+  # 44-78% hit the cap). Turning it off prefills an empty <think></think> and
+  # the model answers directly, which is what the Qwen2.5-7B main table
+  # measures -- so the scale appendix changes the backbone size and nothing
+  # else, and 256 tokens is sufficient again (measured: 0% truncation).
+  chat_template_kwargs:
+    enable_thinking: false
+
   load_in_4bit: true
   # vLLM's share of the card -- below the 7B configs because 14B weights leave less
   # for the training step; raise it for inference-only runs

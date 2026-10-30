@@ -15,7 +15,11 @@ from csr.config import (add_common_args, checkpoint_dir, load_config,
 def parse_args(method: str, description: str) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=description,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_common_args(parser, with_method=False, dataset_default="hotpot")
+    # 2wiki_comp is evaluation-only (no train_size); naming the trainable datasets
+    # fails before the model loads, as train_RLCR.py and train_RD.py already do
+    add_common_args(parser, with_method=False, dataset_default="hotpot",
+                    dataset_choices=["hotpot", "hotpot_context", "trivia",
+                                     "msmarco", "nq_open", "musique"])
     parser.add_argument("--resume-from-checkpoint", dest="resume_from_checkpoint",
                         default=None,
                         help="path to a checkpoint-* directory to resume training from")
@@ -62,6 +66,26 @@ def run(args: argparse.Namespace) -> None:
                                size=int(train_cfg.get("eval_size", 1000)))
 
     model, tokenizer = load_policy(cfg, int(train_cfg["max_seq_length"]))
+
+    # configs/models/<model>.yaml:chat_template_kwargs, applied at the tokenizer so
+    # it reaches every renderer at once: TRL builds the GRPO prompts through
+    # processing_class.apply_chat_template, and csr/callbacks.py renders the
+    # periodic validation through the same method. Without this a reasoning
+    # backbone trains on its own chain of thought -- the reward judges the trace
+    # instead of the answer, and at this completion budget most traces never
+    # close, so the judge sees no answer at all. setdefault, so an explicit
+    # caller argument still wins.
+    _tmpl_kwargs = cfg["model"].get("chat_template_kwargs") or {}
+    if _tmpl_kwargs:
+        _orig_apply = tokenizer.apply_chat_template
+
+        def _apply_with_cfg(*a, **kw):
+            for _k, _v in _tmpl_kwargs.items():
+                kw.setdefault(_k, _v)
+            return _orig_apply(*a, **kw)
+
+        tokenizer.apply_chat_template = _apply_with_cfg
+        print(f"[train] chat_template_kwargs = {_tmpl_kwargs}")
 
     judge = make_judge(cfg, chat_end_markers=cfg["model"].get("chat_end_markers", []))
     rewards = RewardComputer(cfg, judge, correctness_prompt_kind(cfg))

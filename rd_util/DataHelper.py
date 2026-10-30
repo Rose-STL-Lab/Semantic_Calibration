@@ -47,7 +47,7 @@ class DataCollatorForTokenizedQueries(DataCollatorMixin):
 
         return collated_batch
     
-def prepare_queries(sample, tokenizer, systemprompt, tokenize=False):
+def prepare_queries(sample, tokenizer, systemprompt, tokenize=False, template_kwargs=None):
     question = sample["question"]
     # The first answer is considered the ground truth
     gt_candidates = sample["gt_candidates"]
@@ -60,7 +60,8 @@ def prepare_queries(sample, tokenizer, systemprompt, tokenize=False):
         query = tokenizer.apply_chat_template(
                         messages,
                         tokenize=tokenize,
-                        add_generation_prompt=True
+                        add_generation_prompt=True,
+                        **dict(template_kwargs or {})
                 )
     else:
         # Fallback for tokenizers without a built-in chat template, e.g. some Gemma checkpoints.
@@ -283,7 +284,8 @@ def get_dataset_descriptor(dataset):
     
     return dataset_desc
 
-def load_prepared_dataset(dataset, split, method, tokenizer):
+def load_prepared_dataset(dataset, split, method, tokenizer, template_kwargs=None,
+                          system_prompt=None):
     dataset_descriptor = get_dataset_descriptor(dataset)
 
     # Allow datasets to remap requested split names (e.g. bigmath has no
@@ -295,7 +297,9 @@ def load_prepared_dataset(dataset, split, method, tokenizer):
     dataset_norm = dataset.map(lambda x: dataset_descriptor.normalize_function(x), remove_columns=dataset_descriptor.columns_to_remove)
 
     print(dataset_norm[0].keys())
-    system_prompt = get_prompt(dataset_descriptor.type)
-    dataset = dataset_norm.map(lambda x: prepare_queries(x, tokenizer, system_prompt, tokenize=True))
+    # one source for train and eval; get_prompt picks a different scale per type
+    system_prompt = system_prompt or get_prompt(dataset_descriptor.type)
+    dataset = dataset_norm.map(lambda x: prepare_queries(x, tokenizer, system_prompt, tokenize=True,
+                                                         template_kwargs=template_kwargs))
 
     return dataset

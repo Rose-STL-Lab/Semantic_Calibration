@@ -1,0 +1,34 @@
+model:
+  name: qwen32b
+
+  # checkpoints live in ckpt/<METHOD>/<ckpt_name>/
+  ckpt_name: qwen32b
+
+  # Scale appendix: same family and recipe as qwen14b.yaml, only the size changes.
+  # The plain bnb-4bit build, not -unsloth-bnb-4bit: unsloth's vLLM fast path does
+  # not support the dynamic-quant 32B and silently switches to this build anyway
+  # so name it explicitly to keep training and
+  # eval on the same weights.
+  hf_id: unsloth/Qwen3-32B-bnb-4bit
+  use_exact_model_name: false
+
+  chat_end_markers:
+    - "<|im_end|>"
+    - "<|endoftext|>"
+
+  verbalized_separators: [",", ";", ":", ".", "\n"]
+
+  # thinking OFF, exactly as qwen14b.yaml (see the rationale there)
+  chat_template_kwargs:
+    enable_thinking: false
+
+  load_in_4bit: true
+  # vLLM's share of the card; ~19 GB of 4-bit weights. Smoke-tested value goes here.
+  gpu_memory_utilization: 0.4
+
+  lora:
+    rank: 32
+    random_state: 3407
+    alpha: 32
+    dropout: 0.0
+    target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]

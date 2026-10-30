@@ -150,7 +150,7 @@ class PeriodicEvalCallback(TrainerCallback):
 
         train_cfg = self.cfg["method"]["train"]
         markers = self.cfg["model"].get("chat_end_markers", [])
-        k = int(train_cfg.get("eval_num_rollouts", 8))
+        k = int(train_cfg.get("eval_num_rollouts", 16))
 
         confidences, accuracies = [], []
         records: list[dict] = []

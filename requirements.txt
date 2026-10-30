@@ -1,6 +1,5 @@
 # The direct dependencies of csr/, train/, evaluation/, analysis/ and scripts/,
-# at the versions the paper's runs used. environment.yml is the full solved
-# snapshot of that environment; this file is the short list to install by hand.
+# at the versions the paper's runs used.
 #
 # unsloth must be importable before transformers/trl for its patches to apply,
 # which csr/modeling.py relies on. Install torch first, matching your CUDA.

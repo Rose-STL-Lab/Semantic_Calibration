@@ -30,8 +30,6 @@ def parse_args():
     parser.add_argument("--ckpt", default=None,
                         help="checkpoint dir (LoRA adapter or merged model). "
                              "Omit to evaluate the frozen base model.")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="evaluate only the first N questions (debugging)")
     parser.add_argument("--fresh", action="store_true",
                         help="ignore any existing results.json and start over")
     return parser.parse_args()
@@ -66,13 +64,14 @@ def main():
 
     eval_cfg = cfg["method"]["eval"]
     conf_cfg = cfg["method"]["confidence"]
+    tmpl_kwargs = cfg["model"].get("chat_template_kwargs") or {}
     markers = cfg["model"].get("chat_end_markers", [])
     prompt_kind = correctness_prompt_kind(cfg)
     separators = cfg["model"].get("verbalized_separators", [","])
     seed = int(cfg["seed"])
 
     checkpoints = resolve_checkpoints(args.ckpt)
-    dataset = load_split(cfg, split="eval", size=args.limit)
+    dataset = load_split(cfg, split="eval")
 
     for checkpoint in checkpoints:
         # RD ckpts are merged models, not adapters -> reload per checkpoint
@@ -101,7 +100,7 @@ def main():
             example = dataset[i]
             question = example["question"]
             gold = example["answer"]
-            prompt = render_generation_prompt(example["prompt"], tokenizer)
+            prompt = render_generation_prompt(example["prompt"], tokenizer, tmpl_kwargs)
 
             raw = generate(model, tokenizer, prompt, n=1,
                            temperature=float(eval_cfg["temperature"]),
@@ -168,6 +167,7 @@ def main():
             "judge": judge.stats_summary(),
         })
 
+        judge.assert_parsed()
         path = run.save_results(cfg, summary, records, checkpoint=checkpoint)
         print_summary(summary, title=exp_name)
         print(f"[saved] {path}")

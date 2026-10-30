@@ -25,7 +25,11 @@ from csr.config import (add_common_args, checkpoint_dir, dump_config, load_confi
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    # hotpot = closed-book; hotpot_context = RLCR's own "Paragraph <i>" layout
+    # both choices train on hotpot_qa/distractor with the SAME prompt: csr/rlcr.py's
+    # build_problem always emits RLCR's "Supporting Information: Paragraph <i>" layout and
+    # its 0/1/2 paragraph removal, which is how upstream RLCR trains. The configs differ
+    # only in model.gpu_memory_utilization (the 3072/4096 window comes from rlcr.yaml
+    # either way), so neither choice gives a closed-book RLCR -- this repo cannot build one.
     add_common_args(parser, with_method=False, dataset_default="hotpot",
                     dataset_choices=["hotpot", "hotpot_context"])
     parser.add_argument("--resume-from-checkpoint", dest="resume_from_checkpoint",

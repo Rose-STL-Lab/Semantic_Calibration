@@ -43,21 +43,25 @@ We conducted all experiments on NVIDIA A100 80GB PCIe GPUs. Each training or
 evaluation run uses a single GPU. The software environment is Python 3.11.14,
 PyTorch 2.9.0 and CUDA 12.8.
 
-To create the conda environment with all the required dependencies, run:
+To install the dependencies, run:
 
 ```bash
-conda env create -f environment.yml
-conda activate csr
+conda create -n csr python=3.11 && conda activate csr
+pip install torch==2.9.0            # first, and matching your CUDA
+pip install -r requirements.txt
 ```
 
-`environment.yml` is the full solved snapshot; `requirements.txt` is the short
-list of direct dependencies if you would rather install by hand.
+`requirements.txt` pins every direct dependency at the version the reported runs
+used. Install `torch` by itself first: the stack is version-sensitive, and letting
+pip resolve it alongside the rest can silently substitute a different build.
 
 The Rewarding-Doubt baseline pins an older stack (Python 3.10.20, PyTorch 2.5.1,
-CUDA 12.4), so it gets a second environment. Activate it only for `train_RD.py`:
+CUDA 12.4), so it gets a second environment. Use it only for `train_RD.py`:
 
 ```bash
-conda env create -f environment-rd.yml      # or requirements-rd.txt
+conda create -n csr-rd python=3.10 && conda activate csr-rd
+pip install torch==2.5.1
+pip install -r requirements-rd.txt
 ```
 
 ## 2. Setup the Judge
@@ -74,6 +78,12 @@ export OPENAI_API_KEY=sk-...
 
 Nothing else: `configs/judge.yaml` already holds the model, the temperature and the
 retry policy.
+
+**The numbers reported in the paper do not come from this default.** Every result was
+produced with a locally served `gpt-oss-20b` judge and the four overrides shown below.
+The hosted GPT-4.1-nano default is a convenience for getting a first run moving; the two
+judges disagree often enough that their numbers are not comparable, so reproducing a
+table means serving gpt-oss-20b.
 
 To run a local judge instead — gpt-oss-20b, or any other model vLLM can serve — start a
 server and point the config at it:
@@ -118,8 +128,8 @@ it, and none of these directories are tracked:
 | | Available |
 | --- | --- |
 | Methods | `Base` `CSR` `RLVR` `RLCR` `RD` |
-| Models | `qwen` `llama` `mistral` `qwen14b` |
-| Datasets | `hotpot` `hotpot_context` `trivia` `msmarco` `nq_open` |
+| Models | `llama` `qwen` `mistral` `qwen14b` `qwen32b` |
+| Datasets | `hotpot` `hotpot_context` `trivia` `msmarco` `nq_open` `musique` `2wiki_comp` |
 
 ## 4. Train
 
@@ -134,8 +144,26 @@ python train/train_CSR.py --model qwen --dataset hotpot [--set key=value ...]
 ```
 
 `train_RLVR.py`, `train_RLCR.py` and `train_RD.py` take the same arguments. RD pins the
-older stack, so activate the environment built from `environment-rd.yml` for it and the
+older stack, so activate the environment built from `requirements-rd.txt` for it and the
 unsloth one for the other three.
+
+The RD defaults in `configs/methods/rd.yaml` reproduce the upstream Rewarding-Doubt
+release. The RD rows in the paper turn on the flags documented there:
+
+```bash
+python train/train_RD.py --model qwen --dataset hotpot \
+  --set method.train.confidence_stop=true --set method.train.strict_format=true \
+  --set method.train.learning_rate=1e-5 --set method.train.batch_size=8 \
+  --set method.train.ppo_temperature=1.0 --set method.train.ppo_repetition_penalty=1.0
+```
+
+Two memory settings keep the same update at lower activation memory
+(`ppo_mini_batch_size` x `ppo_gradient_accumulation_steps` samples per optimizer step):
+the 32B run uses `2` x `2` and `hotpot_context` uses `1` x `4` together with
+`method.train.unpadded_generation=true`, which generates one prompt at a time (unsloth's
+batched inference is unreliable on prompts of one to two thousand tokens). The Qwen3
+backbones (`qwen14b`, `qwen32b`) need `transformers>=4.51.3` and `unsloth>=2025.4.7` in
+the RD environment in place of the versions pinned in `requirements-rd.txt`.
 
 The two settings that matter most for CSR are the calibration weight and the weight on
 binary correctness:
@@ -205,7 +233,7 @@ log-probability. `analysis/logprobs_hf.py` writes it once per run and is the onl
 here that loads the backbone, so it is the one that needs a GPU:
 
 ```bash
-python analysis/logprobs_hf.py --model qwen7b --method CSR --datasets hotpot trivia
+python analysis/logprobs_hf.py --model qwen --method CSR --datasets hotpot trivia
 ```
 
 Without that file SemDens falls back to uniform weights and `clf-pairs+gen` scores
@@ -229,9 +257,10 @@ Three things worth knowing before changing anything:
 * **Judge calls.** Clustering asks one symmetric equivalence question per unordered
   pair, so K(K−1)/2 calls per question. At K=16 that is 120 calls, which dominates
   evaluation time.
-* **Rollouts per optimizer step.** `generation_batch_size` counts completions, not
-  prompts, so prompts per step is `per_device_train_batch_size * grad_accum /
-  num_generations` — 4 at the defaults, hence 2500 steps for one epoch over 10k prompts.
+* **Rollouts per optimizer step.** TRL counts completions, not prompts:
+  `per_device_train_batch_size * gradient_accumulation_steps` is the completion
+  budget, so prompts per step is that over `num_generations` — `8 * 4 / 8` = 4 at
+  the defaults, hence 2500 steps for one epoch over 10k prompts.
 
 The shipped defaults are `beta` 0.01, a sigmoid calibration weight from `cali_w`
 0.8 to 1.2, training K=8 and evaluation K=16. Earlier preprint versions reported

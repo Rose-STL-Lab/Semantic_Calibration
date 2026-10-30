@@ -28,11 +28,14 @@ method:
     save_steps: 250
     max_grad_norm: 0.1
     logging_steps: 1
-    # Mid-training validation on the eval split. Set to 0 to turn it off;
-    # checkpoints are saved every save_steps either way and can be scored
-    # afterwards with evaluation/eval_semantic.py.
+    # Mid-training validation on the eval split, at the same K as the final
+    # eval below. Set eval_every_steps to 0 to turn it off, or pass
+    # --set method.train.eval_num_rollouts=8 to make each pass ~4x cheaper
+    # when the rows are only being read for their trend; checkpoints are saved
+    # every save_steps either way and can be scored afterwards with
+    # evaluation/eval_semantic.py.
     eval_every_steps: 1000
-    eval_num_rollouts: 8
+    eval_num_rollouts: 16
     eval_max_new_tokens: 256
     eval_temperature: 0.7
     eval_top_p: 0.95

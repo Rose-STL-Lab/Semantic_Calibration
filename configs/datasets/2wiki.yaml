@@ -1,0 +1,32 @@
+dataset:
+  name: 2wiki
+
+  # 2WikiMultihopQA in HotpotQA's own layout: 10 paragraphs, one short answer.
+  # Restricted to the two compositional reasoning types; see keep_types below.
+  hf:
+    path: scholarly-shadows-syndicate/2wikimultihopqa_with_q_gpt35
+  # evaluation only: 95.3% of the eval questions' templates also occur in the train
+  # split, so training on it would not be out of distribution.
+  train_split: validation
+  eval_split: validation
+  eval_size: 1000
+  correctness_prompt: judge
+
+  # comparison and bridge_comparison are 100% answerable from the question alone
+  # (gold is yes/no, or one of the two entities the question names). Dropping them
+  # leaves 6785 questions whose answer appears in the passages 100% of the time.
+  keep_types: [compositional, inference]
+
+  system_prompt:
+    default: |-
+      Provide a concise and direct answer to the question. Use the provided context and reason step-by-step. End with 'Final answer: <answer>'.
+
+model:
+  gpu_memory_utilization: 0.35
+
+method:
+  train:
+    max_prompt_length: 4608
+    max_seq_length: 5120
+  eval:
+    max_seq_length: 5120

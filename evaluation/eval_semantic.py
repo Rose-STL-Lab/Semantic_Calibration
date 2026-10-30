@@ -28,8 +28,6 @@ def parse_args():
     parser.add_argument("--ckpt", default=None,
                         help="LoRA checkpoint dir, or a parent dir holding several. "
                              "Omit to evaluate the frozen base model.")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="evaluate only the first N questions (debugging)")
     parser.add_argument("--fresh", action="store_true",
                         help="ignore any existing results.json and start over")
     parser.add_argument("--question-batch", type=int, default=1,
@@ -79,12 +77,14 @@ def main():
 
     eval_cfg = cfg["method"]["eval"]
     markers = cfg["model"].get("chat_end_markers", [])
+    # e.g. {"enable_thinking": false} for Qwen3, {"reasoning_effort": "low"} for gpt-oss
+    tmpl_kwargs = cfg["model"].get("chat_template_kwargs") or {}
     seed = int(cfg["seed"])
     k = int(eval_cfg["num_rollouts"])
 
     prompt_kind = correctness_prompt_kind(cfg)
     checkpoints = resolve_checkpoints(args.ckpt)
-    dataset = load_split(cfg, split="eval", size=args.limit)
+    dataset = load_split(cfg, split="eval")
 
     # judge phase re-reads rollouts from disk, so it must not take a GPU --
     # csr.modeling imports unsloth, which refuses to load without one
@@ -207,7 +207,8 @@ def main():
             while start < n:
                 block = list(range(start, min(start + qb, n)))
                 examples = [dataset[i] for i in block]
-                prompts = [render_generation_prompt(ex["prompt"], tokenizer) for ex in examples]
+                prompts = [render_generation_prompt(ex["prompt"], tokenizer, tmpl_kwargs)
+                           for ex in examples]
 
                 if qb == 1:
                     gens = [rollouts_with_tokens(model, tokenizer, prompts[0], **gen_kwargs)]
@@ -262,6 +263,7 @@ def main():
             "judge": judge.stats_summary(),
         })
 
+        judge.assert_parsed()
         path = run.save_results(cfg, summary, records, checkpoint=checkpoint)
         print_summary(summary, title=exp_name)
         print(f"[saved] {path}")

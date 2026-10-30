@@ -40,13 +40,16 @@ method:
     save_steps: 250
     max_grad_norm: 0.1
     logging_steps: 1
-    # Mid-training validation on the eval split. Each pass costs
-    # eval_size x (eval_num_rollouts + K(K-1)/2) judge calls, so it is not
-    # cheap; set eval_every_steps to 0 to turn it off. Checkpoints are saved
-    # every save_steps either way and can be scored afterwards with
+    # Mid-training validation on the eval split, at the same K as the final
+    # eval below so the two are directly comparable. Each pass costs
+    # eval_size x (K + K(K-1)/2) judge calls -- 136k at K=16 -- so it is not
+    # cheap; set eval_every_steps to 0 to turn it off, or pass
+    # --set method.train.eval_num_rollouts=8 (36k calls) when the validation
+    # rows are only being read for their trend. Checkpoints are saved every
+    # save_steps either way and can be scored afterwards with
     # evaluation/eval_semantic.py.
     eval_every_steps: 1000
-    eval_num_rollouts: 8
+    eval_num_rollouts: 16
     eval_max_new_tokens: 256
     eval_temperature: 0.7
     eval_top_p: 0.95

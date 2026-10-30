@@ -53,6 +53,16 @@ def write_json_atomic(path: Path, payload: dict) -> None:
 
 
 def main() -> None:
+    # argparse, so --help is help: without it any argument is ignored and the
+    # script rebuilds all 12 target dirs on the spot
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__ or "")
+    ap.add_argument("--models", nargs="+", default=list(MODELS), choices=list(MODELS),
+                    help="model families to rebuild (default: all)")
+    ap.add_argument("--datasets", nargs="+", default=list(DATASETS),
+                    choices=list(DATASETS), help="datasets to rebuild (default: all)")
+    args = ap.parse_args()
+
     manifest = {
         "schema": "csr-f1train-f1eval-v1",
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -65,15 +75,23 @@ def main() -> None:
         "macro_averages": {},
     }
 
-    for model, cfg in MODELS.items():
+    for model, cfg in ((m, MODELS[m]) for m in args.models):
         tag = cfg["tag"]
         threshold = float(cfg["threshold"])
         model_rows = []
-        for dataset in DATASETS:
+        for dataset in args.datasets:
             source_name = f"CSR_{model}_{dataset}_f1eq{tag}_step2500_oss_k16"
             target_name = f"CSR_{model}_{dataset}_f1eq{tag}_step2500_oss_semf1_k16"
             source_path = RESULTS / source_name / "results.json"
             target_path = RESULTS / target_name / "results.json"
+            if not source_path.exists():
+                raise SystemExit(
+                    f"missing {source_path}\n"
+                    f"produce it first with:\n"
+                    f"  python evaluation/eval_semantic.py --method CSR --model <key> "
+                    f"--dataset {dataset} --exp-name {source_name} "
+                    f"--ckpt <f1-trained checkpoint> "
+                    f"--set judge.equivalence=f1 --set judge.f1_threshold={threshold}")
             source = json.loads(source_path.read_text(encoding="utf-8"))
 
             if source.get("status") != "final" or source.get("n_records") != 1000:

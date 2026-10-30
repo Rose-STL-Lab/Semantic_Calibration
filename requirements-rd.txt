@@ -1,6 +1,5 @@
-# The Rewarding-Doubt baseline pins an older stack and gets its own environment;
-# environment-rd.yml is the full snapshot. Only train/train_RD.py and rd_util/
-# need this.
+# The Rewarding-Doubt baseline pins an older stack and gets its own environment.
+# Only train/train_RD.py and rd_util/ need this.
 
 torch==2.5.1
 unsloth==2025.1.5
@@ -13,3 +12,14 @@ datasets==3.2.0
 
 torchmetrics==1.6.1         # rd_util/EvaluationMetrics.py
 dacite==1.8.1               # rd_util/ResponseHandling.py
+
+numpy==2.2.6
+scipy==1.15.1               # rd_util/RLHelper.py
+scikit-learn==1.6.1         # rd_util/EvaluationMetrics.py
+tqdm==4.67.3
+PyYAML==6.0.3               # train_RD.py reads the layered config through csr.config
+
+# Optional: only the MATH_VERIFY metric needs it, and rd_util/EvaluationMetrics.py
+# imports it inside a try that returns 0.0 on failure -- so a missing install
+# scores every answer wrong instead of raising.
+# math-verify==0.9.0

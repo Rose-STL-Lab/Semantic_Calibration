@@ -17,6 +17,7 @@ runs/
 
 # Caches and scratch state that the trainer writes into the working directory.
 unsloth_compiled_cache/
+.rd_unsloth_cwd*/
 grpo_trainer_lora_model_*/
 
 # ------------------------------------------------------- not part of the release
@@ -27,6 +28,10 @@ analysis/qualitative_examples.py
 
 # Superseded variants.
 _archive/
+
+# Runs whose protocol turned out to be wrong, kept on disk as a record only.
+# Their numbers must not enter the paper; see ABANDONED/README.md.
+ABANDONED/
 analysis/semdens_formal.py
 
 
@@ -47,6 +52,13 @@ scripts/watch_eval.py
 scripts/report_table9.py
 scripts/seed_eval_from_validation.py
 scripts/serve/serve_oss20b_gpu*.sh
+scripts/*.sh
+
+# Editor backups made while changing a config or callback.
+*.bak_k16
+
+# The author's own checks, not part of the release.
+tests/
 
 # Working notes, not documentation.
 EXPERIMENT_LOG.md
@@ -55,6 +67,7 @@ HANDOFF_TABLE10.md
 RUNBOOK_LOGPROBS.md
 RENAME_MAP.tsv
 reward_patch_notes.md
+rd_confidence_stop_notes.md
 
 # ---------------------------------------------- credentials and editor leftovers
 .env

@@ -1,0 +1,14 @@
+dataset:
+  name: simpleqa
+
+  # one 'test' split of 4,326 questions, closed-book, no context. 10k train is
+  # impossible: a 1000-question eval head leaves 3,326 for training.
+  hf:
+    path: basicv8vc/SimpleQA
+  train_split: test
+  eval_split: test
+  single_split: true
+  train_size: 3326
+  eval_size: 1000
+
+  correctness_prompt: gold

@@ -16,7 +16,9 @@ from openai import AzureOpenAI, OpenAI
 
 from .parsing import canonicalize_answer, sanitize_for_judge
 
-_YESNO_LINE_RE = re.compile(r"(?im)^\s*CORRECT\s*:\s*(YES|NO)\b")
+# not line-anchored: a verdict sharing its line with prose would otherwise
+# fall through to _YESNO_ANY_RE, which takes the first YES/NO in the whole text
+_YESNO_LINE_RE = re.compile(r"(?i)\bCORRECT\s*:\s*(YES|NO)\b")
 _YESNO_ANY_RE = re.compile(r"\b(YES|NO)\b")
 
 
@@ -304,6 +306,33 @@ class Judge:
             for (pos, k), label in zip(where, labels):
                 out[pos][k] = label
         return out
+
+    def assert_parsed(self, max_unparsed_rate: float = 0.02) -> None:
+        """Refuse to let a run be written when the judge was not actually answering.
+
+        A reasoning judge whose verdict does not fit in max_tokens returns an empty
+        message, every call is scored unparsed, and the run still completes -- with
+        every label defaulted. That has to stop the run, not reach results.json.
+        """
+        summary = self.stats_summary()
+        broken = []
+        for name, stats in summary.items():
+            if not isinstance(stats, dict) or "unparsed_rate" not in stats:
+                continue
+            total = int(stats.get("total") or 0)
+            rate = float(stats.get("unparsed_rate") or 0.0)
+            if total >= 20 and rate > max_unparsed_rate:
+                broken.append(
+                    f"{name}: {stats.get('unparsed')}/{total} unparsed ({rate:.1%}), "
+                    f"parsed_yes={stats.get('parsed_yes')} parsed_no={stats.get('parsed_no')}")
+        if broken:
+            raise SystemExit(
+                "[judge] refusing to write results: the judge did not return parseable "
+                "verdicts.\n  " + "\n  ".join(broken) +
+                f"\n  model_id={summary.get('model_id')}\n"
+                "  A reasoning judge needs room for its verdict -- retry with "
+                "--set judge.reasoning_effort=low --set judge.max_tokens=256 "
+                "(gpt-oss-20b), or raise max_tokens.")
 
     def stats_summary(self) -> dict:
         def block(stats):

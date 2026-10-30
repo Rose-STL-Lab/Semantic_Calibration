@@ -10,5 +10,5 @@ HotpotQA was added to the dataset registry (DataHelper.py) with F1 scoring, sinc
 exact match is unreachable for free-form answers (EvaluationMetrics.py).
 
 Only ``train/train_RD.py`` uses this package, and only in the RD conda
-environment (environment-rd.yml).
+environment (requirements-rd.txt).
 """

@@ -12,12 +12,16 @@ from typing import Sequence
 import torch
 
 
-def render_generation_prompt(prompt_messages, tokenizer) -> str:
-    # the model's chat template, or plain concatenation if it has none
+def render_generation_prompt(prompt_messages, tokenizer, template_kwargs=None) -> str:
+    # chat template, else plain concat. template_kwargs = the model yaml's
+    # chat_template_kwargs -- template variables, not generation args:
+    #   Qwen3 enable_thinking=False -> empty <think></think>
+    # a key the template never reads is ignored
     if isinstance(prompt_messages, list) and hasattr(tokenizer, "apply_chat_template") \
             and getattr(tokenizer, "chat_template", None):
         return tokenizer.apply_chat_template(
-            prompt_messages, tokenize=False, add_generation_prompt=True
+            prompt_messages, tokenize=False, add_generation_prompt=True,
+            **dict(template_kwargs or {}),
         )
     if isinstance(prompt_messages, list):
         chunks = []
@@ -34,7 +38,15 @@ def count_tokens(tokenizer, text) -> int:
 
 
 def _use_vllm(model) -> bool:
-    return hasattr(model, "fast_generate")
+    # fast_generate is on both branches: unsloth wraps model.generate with it even
+    # when fast_inference is off, so it is not a vLLM test. The sibling attribute
+    # is -- vLLM gets a functools.partial, plain HF the error_out_no_vllm stub.
+    if not hasattr(model, "fast_generate"):
+        return False
+    batches = getattr(model, "fast_generate_batches", None)
+    if getattr(batches, "__name__", "") == "error_out_no_vllm":
+        return False
+    return True
 
 
 @torch.inference_mode()
@@ -72,15 +84,29 @@ def generate(model, tokenizer, prompt: str, *, n: int = 1, temperature: float = 
         kwargs["temperature"] = float(temperature)
         kwargs["top_p"] = float(top_p)
 
-    completions = []
-    for _ in range(int(n)):
-        output = model.generate(**kwargs)
-        completions.append(
-            tokenizer.decode(output[0, prompt_len:], skip_special_tokens=True)
-        )
+    # one call for all n samples instead of n sequential calls; greedy decoding
+    # has only one distinct sample, so it stays at 1
+    n_return = int(n) if do_sample else 1
+    if n_return > 1:
+        kwargs["num_return_sequences"] = n_return
+    output = model.generate(**kwargs)
+
+    # skip_special_tokens=False on purpose: for a channel-structured model the
+    # control tokens are the only thing separating reasoning from the answer,
+    # and dropping them here is unrecoverable. The trailing ones are peeled
+    # later by strip_chat_markers via the model's chat_end_markers.
+    completions = [
+        tokenizer.decode(row[prompt_len:], skip_special_tokens=False)
+        for row in output[:n_return]
+    ]
+    # only reachable at temperature 0, where the n samples are identical by
+    # definition, so padding them out is not inventing diversity
+    while len(completions) < int(n):
+        completions.append(completions[-1] if completions else "")
     return completions
 
 
+@torch.inference_mode()
 def _token_report(tokenizer, prompt: str, raw: list[str]) -> dict:
     prompt_tokens = count_tokens(tokenizer, prompt)
     completion_tokens = [count_tokens(tokenizer, text) for text in raw]

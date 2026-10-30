@@ -8,7 +8,8 @@ such field and must be re-judged by rerunning evaluation/eval_semantic.py.
 Only ``correct``/``accuracy`` are recomputed (same rule as eval_verbalized.py:
 no extracted answer -> 0, no judge call); answers, confidences and format flags
 are copied from the source. The judge comes entirely from ``--set judge.*``. The new
-run records ``rejudged_from`` and ``agreement_with_source_labels`` in its summary.
+run records ``rejudged_from`` and ``agreement_with_source_labels`` in its summary, and keeps the
+source run's ``checkpoint`` and ECE binning so it is not mistaken for a fresh evaluation.
 
     python scripts/rejudge.py --method RD --model qwen --dataset hotpot --src <results/ dir> \
         --exp-name <new run dir> --set judge.base_url=http://127.0.0.1:8310/v1
@@ -24,6 +25,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from csr.config import add_common_args, load_config  # noqa: E402
+
+
+def _avg(records, key):
+    values = [r[key] for r in records if r.get(key) is not None]
+    return float(sum(values) / len(values)) if values else float("nan")
 
 
 def main():
@@ -70,20 +76,33 @@ def main():
         print(f"  judged {min(start + args.chunk, len(todo))}/{len(todo)}", flush=True)
 
     new = [int(r["correct"]) for r in records]
-    summary = summarize([r["confidence"] for r in records], [r["accuracy"] for r in records],
-                        int(cfg["method"]["eval"]["ece_bins"]))
+    # bin the ECE the way the source run did, not the way this method's config does
+    ece_bins = int(cfg["method"]["eval"]["ece_bins"])
+    src_cfg_path = os.path.join(cfg["paths"]["results"], args.src, "config.yaml")
+    if os.path.exists(src_cfg_path):
+        import yaml
+        src_cfg = yaml.safe_load(open(src_cfg_path, encoding="utf-8")) or {}
+        src_bins = ((src_cfg.get("method") or {}).get("eval") or {}).get("ece_bins")
+        if src_bins is not None:
+            ece_bins = int(src_bins)
+    summary = summarize([r["confidence"] for r in records], [r["accuracy"] for r in records], ece_bins)
     summary.update({
         "num_rollouts": 1,
         "checkpoint_step": src.get("summary", {}).get("checkpoint_step"),
         "confidence_format_adherence": float(sum(bool(r.get("format_ok")) for r in records) / max(1, len(records))),
+        "avg_prompt_tokens": _avg(records, "prompt_tokens"),
+        "avg_completion_tokens": _avg(records, "completion_tokens"),
+        "avg_total_tokens": _avg(records, "total_tokens"),
         "judge": judge.stats_summary(),
         "rejudged_from": args.src,
         # fraction of labels unchanged relative to the source run's judge
         "agreement_with_source_labels": float(sum(a == b for a, b in zip(old, new)) / max(1, len(new))),
     })
+    # carry the source's checkpoint so the run is not mistaken for a base-model eval
+    src_checkpoint = src.get("checkpoint") or None
     run = RunDir(cfg["paths"]["results"], args.exp_name)
-    run.save_config(cfg, checkpoint=None)
-    path = run.save_results(cfg, summary, records, checkpoint=None)
+    run.save_config(cfg, checkpoint=src_checkpoint)
+    path = run.save_results(cfg, summary, records, checkpoint=src_checkpoint)
     print_summary(summary, title=args.exp_name)
     print(f"  source acc {sum(old)/len(old):.4f} -> rejudged acc {sum(new)/len(new):.4f}; "
           f"label agreement {summary['agreement_with_source_labels']:.4f}")

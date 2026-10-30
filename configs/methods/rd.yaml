@@ -1,6 +1,6 @@
 # Rewarding Doubt (Bani-Harouni et al., 2025): PPO with a clipped log-loss on
 # the verbalized confidence. Training runs in the upstream RD conda environment
-# (environment-rd.yml); evaluation runs in the normal `csr` environment.
+# (requirements-rd.txt); evaluation runs in the normal `csr` environment.
 method:
   name: RD
   system_prompt: |-
@@ -27,9 +27,51 @@ method:
     reward_log_interval: 10
     shuffle_seed: 42
 
-    # Upstream's value. A rollout cut off before "Confidence:" is unparsable
-    # and takes the wrong-format penalty, so this has room to spare.
     ppo_max_new_tokens: 500
+    # Sampling temperature of the stage-2 (confidence) generation that PPO trains
+    # on. null is upstream: each model's own generation_config applies (qwen 0.7,
+    # llama 0.6, mistral 1.0) although PPO scores the samples at 1.0. 1.0 samples
+    # from the policy being optimized, the same for every model.
+    ppo_temperature: null
+    # Explicitly disable Qwen2.5's inherited repetition_penalty 1.05: PPO scores
+    # unpenalized logits. Set null only to reproduce the legacy sampler.
+    ppo_repetition_penalty: 1.0
+
+    # Stop stage 1 at " Confidence" as upstream does, so the PPO response is the
+    # confidence and that token receives the gradient. false reproduces the
+    # released checkpoints, whose stage 1 ran to EOS instead.
+    confidence_stop: false
+
+    # TRL's adaptive KL controller moves kl_coef by (kl/target - 1) * step/horizon per
+    # step. At the default 10000 it barely reacts on the ~50-step scale on which a
+    # policy can lock onto a constant confidence. 10000 is upstream.
+    kl_horizon: 10000
+
+    # Gradient-norm clip for the PPO update. null (no clipping) is upstream. A base
+    # model whose confidence prior sits on the reward's one negative point (a
+    # confidence of 10) takes very large first PPO steps; clipping bounds them.
+    max_grad_norm: null
+
+    # Training parser without the independent-field fallback, as upstream's single
+    # regex: "Answer: Confidence: 0" and period-separated refusals become format
+    # failures (-30) instead of the +10 a wrong answer earns at confidence 0. Comma
+    # and newline separators and 0-1 decimals are still accepted.
+    strict_format: false
+
+    # TRL's per-step early stop on the policy KL between PPO epochs.
+    ppo_early_stopping: false
+    ppo_target_kl: 1.0
+
+    # PPO optimizer-step granularity: mini_batch_size * gradient_accumulation_steps samples
+    # per update. null = batch_size / 2 with no accumulation (upstream). Setting 2 and 2
+    # for batch 8 gives the identical update at half the activation memory.
+    ppo_mini_batch_size: null
+    ppo_gradient_accumulation_steps: 1
+
+    # Generate one prompt at a time (both stages, no pad tokens). Needed for
+    # hotpot_context: on 1-2k-token prompts unsloth's batched inference returns
+    # garbage for the left-padded rows. false is upstream (batched, left-padded).
+    unpadded_generation: false
 
     # sampling for the periodic train/validation generations, not the PPO rollouts
     rollout_max_new_tokens: 256
@@ -44,3 +86,10 @@ method:
     max_new_tokens: 256
     max_seq_length: 1024
     ece_bins: 10
+
+# RD asks for "'Answer: <a>, Confidence: <c>' and nothing else", and a reasoning
+# trace spends the rollout budget before reaching it. Ignored by templates without
+# the flag (Qwen2.5-7B, Llama-3.1-8B, Mistral-7B-v0.3).
+model:
+  chat_template_kwargs:
+    enable_thinking: false
