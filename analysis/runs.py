@@ -20,7 +20,7 @@ MODEL_LABELS = {"llama8b": "Llama", "qwen7b": "Qwen", "mistral7b": "Mistral"}
 RUN_TEMPLATES = {
     "Base": "Base_{model}_{dataset}_base_oss_k16",
     "RLVR": "RLVR_{model}_{dataset}_step2500_oss_k16",
-    "RD": "RD_{model}_{dataset}_step2500_oss_k1",
+    "RD": "RD_{model}_{dataset}_b8_step1250_oss_k1",
     "RLCR": "RLCR_{model}_{dataset}_step2500_oss_k1",
     "CSR": "CSR_{model}_{dataset}_z10_step2500_oss_k16",
 }

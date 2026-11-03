@@ -226,7 +226,6 @@ no estimator here is ever used during training:
 | `analysis/estimators.py` | Semantic Density and SIMBA-UQ's Bayesian aggregation |
 | `analysis/aggregation.py` | SIMBA-UQ's arithmetic aggregation and the `clf-pairs+gen` classifier |
 | `analysis/selective.py` | Selective prediction (AURAC, AUGRC) |
-| `scripts/rejudge.py` | Re-scoring a finished run with a different judge |
 
 Semantic Density and both SIMBA rules read one extra per-rollout feature, the mean token
 log-probability. `analysis/logprobs_hf.py` writes it once per run and is the only script

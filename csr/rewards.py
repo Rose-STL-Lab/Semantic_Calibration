@@ -37,6 +37,18 @@ def gold_for_row(answer, index: int, batch: int, n: int):
     return answer
 
 
+def row_questions(prompts, question=None) -> list[str]:
+    # the dataset's own question column, which TRL hands every reward function; on
+    # context datasets the user turn is "Context: ... Question: q", and the judge,
+    # which keeps the first 1000 chars, would see passages in place of the question
+    if question is not None:
+        if len(question) != len(prompts):
+            raise ValueError(f"expected one question per prompt, got {len(question)} "
+                             f"for {len(prompts)} prompts")
+        return [str(q or "").strip() for q in question]
+    return [extract_user_question(p) for p in prompts]
+
+
 class RewardComputer:
     def __init__(self, cfg, judge, correctness_prompt_kind: str = "judge"):
         train_cfg = cfg["method"]["train"]
@@ -73,14 +85,15 @@ class RewardComputer:
         return self.cali_w
 
     # -- helpers ----------------------------------------------------------
-    def _batch_key(self, prompts, completions, answer) -> bytes:
+    def _batch_key(self, prompts, completions, answer, question=None) -> bytes:
         digest = hashlib.blake2b(digest_size=16)
         n, batch = len(completions), len(prompts)
-        for i, (prompt, completion) in enumerate(zip(prompts, completions)):
-            question = extract_user_question(prompt)
+        questions = row_questions(prompts, question)
+        for i, completion in enumerate(completions):
+            q_text = questions[i]
             answer_text = normalize_for_equiv(completion, self.markers)
             gold = normalize_for_equiv(gold_for_row(answer, i, batch, n), self.markers)
-            for part in (question, answer_text, gold):
+            for part in (q_text, answer_text, gold):
                 digest.update((part or "").encode("utf-8", "ignore"))
                 digest.update(b"\x00")
         return digest.digest()
@@ -90,22 +103,23 @@ class RewardComputer:
 
     # -- reward functions -------------------------------------------------
     @torch.no_grad()
-    def calibration_reward(self, prompts, completions, answer, **_):
+    def calibration_reward(self, prompts, completions, answer, question=None, **_):
         n, batch = len(completions), len(prompts)
         if n != batch:
             raise ValueError(f"expected one prompt per completion, got n={n}, batch={batch}")
 
         texts = [strip_prompt_prefix(c, self.markers) for c in completions]
+        questions = row_questions(prompts, question)
         rewards = torch.zeros(n, dtype=torch.float32)
         verdicts = [0] * n
 
         for _, indices in group_by_prompt(prompts).items():
             group = [normalize_for_equiv(texts[i], self.markers) for i in indices]
             gold = gold_for_row(answer, indices[0], batch, n)
-            question = extract_user_question(prompts[indices[0]])
+            q_text = questions[indices[0]]
             k = len(group)
 
-            q_labels = self._judge_group(group, gold, question)
+            q_labels = self._judge_group(group, gold, q_text)
             for j, row in enumerate(indices):
                 verdicts[row] = int(q_labels[j])
             q = torch.tensor(q_labels, dtype=torch.float32)
@@ -169,22 +183,23 @@ class RewardComputer:
             raise ValueError(f"[calibration_reward] non-finite reward: {rewards.tolist()}")
 
         # hand the verdicts to correctness_reward; the judge is not paid twice
-        self._verdict_cache[self._batch_key(prompts, completions, answer)] = verdicts
+        self._verdict_cache[self._batch_key(prompts, completions, answer, question)] = verdicts
         return (rewards * float(self.cali_w)).tolist()
 
 
     @torch.no_grad()
-    def correctness_reward(self, prompts, completions, answer, **_):
+    def correctness_reward(self, prompts, completions, answer, question=None, **_):
         n, batch = len(completions), len(prompts)
         if n != batch:
             raise ValueError(f"expected one prompt per completion, got n={n}, batch={batch}")
 
-        cached = self._verdict_cache.pop(self._batch_key(prompts, completions, answer), None)
+        cached = self._verdict_cache.pop(
+            self._batch_key(prompts, completions, answer, question), None)
         if cached is not None:
             return [self.corr_w if int(y) == 1 else 0.0 for y in cached]
 
         answers = [normalize_for_equiv(c, self.markers) for c in completions]
-        questions = [extract_user_question(p) for p in prompts]
+        questions = row_questions(prompts, question)
         # the alias list must stay intact: normalize_for_equiv keeps only the first
         # alias, so "Mumbai" would miss gold ["Bombay", "Mumbai"]
         golds = [gold_for_row(answer, i, batch, n) for i in range(n)]

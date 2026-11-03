@@ -1,8 +1,8 @@
-"""Tables 5, 8 and 12, recomputed from this repo's evaluation runs.
+"""Tables 5 and 12, recomputed from this repo's evaluation runs.
 
 Re-summarises records that already exist -- no GPU, no judge.
 
-    python analysis/selective.py --table 5|8|12|all [--latex]
+    python analysis/selective.py --table 5|12|all [--latex]
 """
 
 from __future__ import annotations
@@ -104,62 +104,11 @@ def table5(latex: bool) -> None:
             print("\\midrule")
 
 
-def table8(latex: bool) -> None:
-    # Table 8: (M-B)/B for acc and AUROC, (B-M)/B for ECE -- positive is always better
-    def metrics(exp):
-        s = load(exp)["summary"]
-        return s["accuracy"], s["ece"], s["auroc"]
-
-    acc_id, ece_id, auc_id, acc_ood, ece_ood, auc_ood = ({} for _ in range(6))
-    for method in RUN_TEMPLATES:
-        if method == "Base":
-            continue
-        rel = {k: [] for k in ("acc_id", "ece_id", "auc_id", "acc_ood", "ece_ood", "auc_ood")}
-        for model in MODELS:
-            b_id = metrics(run_name("Base", model, "hotpot"))
-            m_id = metrics(run_name(method, model, "hotpot"))
-            rel["acc_id"].append((m_id[0] - b_id[0]) / b_id[0] * 100)
-            rel["ece_id"].append((b_id[1] - m_id[1]) / b_id[1] * 100)
-            rel["auc_id"].append((m_id[2] - b_id[2]) / b_id[2] * 100)
-            ood = [d for d, _ in DATASETS if d != "hotpot"]
-            b = np.mean([metrics(run_name("Base", model, d)) for d in ood], axis=0)
-            mm = np.mean([metrics(run_name(method, model, d)) for d in ood], axis=0)
-            rel["acc_ood"].append((mm[0] - b[0]) / b[0] * 100)
-            rel["ece_ood"].append((b[1] - mm[1]) / b[1] * 100)
-            rel["auc_ood"].append((mm[2] - b[2]) / b[2] * 100)
-        acc_id[method], ece_id[method], auc_id[method] = (np.mean(rel["acc_id"]),
-                                                          np.mean(rel["ece_id"]),
-                                                          np.mean(rel["auc_id"]))
-        acc_ood[method], ece_ood[method], auc_ood[method] = (np.mean(rel["acc_ood"]),
-                                                             np.mean(rel["ece_ood"]),
-                                                             np.mean(rel["auc_ood"]))
-    order = [m for m in RUN_TEMPLATES if m != "Base"]
-    best = {name: max(d.values()) for name, d in
-            (("acc_id", acc_id), ("ece_id", ece_id), ("auc_id", auc_id),
-             ("acc_ood", acc_ood), ("ece_ood", ece_ood), ("auc_ood", auc_ood))}
-    if not latex:
-        print("\n### Table 8  change against Base (%), averaged over the three model families")
-        print("| Method | ID Acc | ID ECE drop | ID AUROC | OOD Acc | OOD ECE drop | OOD AUROC |")
-        print("|---|---|---|---|---|---|---|")
-    for method in order:
-        vals = [(acc_id[method], "acc_id"), (ece_id[method], "ece_id"), (auc_id[method], "auc_id"),
-                (acc_ood[method], "acc_ood"), (ece_ood[method], "ece_ood"), (auc_ood[method], "auc_ood")]
-        if latex:
-            cells = []
-            for v, key in vals:
-                s = f"{v:+.1f}"
-                cells.append(f"$\\mathbf{{{s}}}$" if abs(v - best[key]) < 1e-9 else f"${s}$")
-            label = f"\\textbf{{{method}}}" if method == "CSR" else method
-            print(f"{label:6} & " + " & ".join(cells) + "\\\\")
-        else:
-            print(f"| {method} | " + " | ".join(f"{v:+.1f}" for v, _ in vals) + " |")
-
-
 def table12(latex: bool) -> None:
     # Table 12: fraction whose verbalized confidence parsed and was in range
     for model in MODELS:
         if latex:
-            print(f"\\multirow{{5}}{{*}}{{{model.capitalize()}}}")
+            print(f"\\multirow{{5}}{{*}}{{{MODEL_LABELS[model]}}}")
         else:
             print(f"\n### {model}  parsing rate")
             print("| Method | " + " | ".join(t for _, t in DATASETS) + " |")
@@ -183,13 +132,11 @@ def table12(latex: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--table", choices=["5", "8", "12", "all"], default="all")
+    parser.add_argument("--table", choices=["5", "12", "all"], default="all")
     parser.add_argument("--latex", action="store_true")
     args = parser.parse_args()
     if args.table in ("5", "all"):
         table5(args.latex)
-    if args.table in ("8", "all"):
-        table8(args.latex)
     if args.table in ("12", "all"):
         table12(args.latex)
 

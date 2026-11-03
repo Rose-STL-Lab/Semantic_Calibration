@@ -19,9 +19,9 @@ method:
     max_train_samples: 10000
     max_validation_samples: 1000
     max_eval_train_samples: 1000
-    save_every_steps: 250      # checkpoint cadence -- independent of eval below
+    save_every_steps: 125      # checkpoint cadence (10 checkpoints at the paper recipe, batch_size 8) -- independent of eval below
     # Mid-training validation on the eval split. Set to 0 to turn it off;
-    # checkpoints are saved every save_steps either way and can be scored
+    # checkpoints are saved every save_every_steps either way and can be scored
     # afterwards with evaluation/eval_verbalized.py.
     eval_every_steps: 1000
     reward_log_interval: 10
