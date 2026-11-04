@@ -13,10 +13,9 @@ trl==0.24.0
 peft==0.18.1
 accelerate==1.13.0
 datasets==4.3.0
-bitsandbytes==0.49.2        # analysis/logprobs_hf.py loads the backbone in 4-bit
+bitsandbytes==0.49.2        # 4-bit backbones
 
 openai==2.16.0              # the judge client, hosted or a local OpenAI-compatible server
-math-verify==0.9.0
 
 numpy==2.2.6
 scipy==1.17.0

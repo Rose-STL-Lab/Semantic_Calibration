@@ -11,6 +11,6 @@ def get_prompt(task_type: str):
     try:
         prompt = prompts[task_type]
     except KeyError:
-        raise NotImplementedError(f"For this task no prompt has been specified! : {type}")
+        raise NotImplementedError(f"For this task no prompt has been specified! : {task_type}")
     
     return prompt

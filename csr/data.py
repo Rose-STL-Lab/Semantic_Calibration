@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import json
 from functools import partial
 
 from datasets import load_dataset
@@ -153,25 +152,6 @@ def _nq_open(example, system_prompt, user_template):
     }
 
 
-def _simpleqa(example, system_prompt, user_template):
-    question = example["problem"]
-    meta = example.get("metadata") or {}
-    if isinstance(meta, str):
-        try:
-            meta = json.loads(meta.replace("'", '"'))
-        except json.JSONDecodeError:
-            meta = {}
-    return {
-        "prompt": _messages(system_prompt, question, user_template),
-        "question": question,
-        "answer": str(example.get("answer", "")),
-        "meta": {
-            "topic": meta.get("topic", ""),
-            "answer_type": meta.get("answer_type", ""),
-        },
-    }
-
-
 def _context_prompt(system_prompt, user_template, context: str, question: str):
     # the layout hotpot_context trains on, so an OOD prompt differs only in content
     if not context:
@@ -206,25 +186,6 @@ def _musique(example, system_prompt, user_template, method: str = "CSR"):
     }
 
 
-def _msmarco_context(example, system_prompt, user_template, method: str = "CSR"):
-    # the same queries and golds as _msmarco, with the passages MSMARCO ships
-    record = _msmarco(example, system_prompt, user_template)
-    passages = example.get("passages") or {}
-    texts = passages.get("passage_text") or []
-    blocks, bodies = [], []
-    for i, text in enumerate(texts):
-        body = clean_unicode_text(text).strip()
-        if body:
-            blocks.append(f"Title: Passage {i + 1}\n{body}")
-            bodies.append(body)
-    record["prompt"] = (
-        _rlcr_problem(system_prompt, user_template, bodies, record["question"])
-        if method == "RLCR" else
-        _context_prompt(system_prompt, user_template, "\n\n".join(blocks), record["question"]))
-    record["meta"]["num_passages"] = len(blocks)
-    return record
-
-
 def _twowiki(example, system_prompt, user_template, method: str = "CSR"):
     # HotpotQA's layout with `content` in place of `sentences`
     question = example["question"]
@@ -256,20 +217,15 @@ BUILDERS = {
     "trivia": _trivia,
     "msmarco": _msmarco,
     "nq_open": _nq_open,
-    "simpleqa": _simpleqa,
     "musique": _musique,
-    "msmarco_context": _msmarco_context,
-    "2wiki": _twowiki,
     "2wiki_comp": _twowiki,
-    "2wiki_inf": _twowiki,
 }
 
 # builders whose prompt depends on the method (RD/RLCR keep their own layouts)
-METHOD_AWARE_BUILDERS = {"hotpot_context", "musique", "msmarco_context",
-                         "2wiki", "2wiki_comp", "2wiki_inf"}
+METHOD_AWARE_BUILDERS = {"hotpot_context", "musique", "2wiki_comp"}
 
 # MSMARCO has rows with no usable gold; unscorable
-REQUIRES_NONEMPTY_GOLD = {"msmarco", "msmarco_context"}
+REQUIRES_NONEMPTY_GOLD = {"msmarco"}
 
 
 def _resolve_split(raw, requested: str) -> str:

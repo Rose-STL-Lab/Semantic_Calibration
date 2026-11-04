@@ -18,6 +18,3 @@ scipy==1.15.1               # rd_util/EvaluationMetrics.py
 scikit-learn==1.6.1         # rd_util/EvaluationMetrics.py
 tqdm==4.67.3
 PyYAML==6.0.3               # train_RD.py reads the layered config through csr.config
-
-# Optional, for the MATH_VERIFY metric; if missing, that metric silently scores 0.
-# math-verify==0.9.0

@@ -15,30 +15,7 @@ from rd_util.ResponseHandling import QAResult
 class Metric(Enum):
     EXACT = 1
     F1 = 2
-    MATH_VERIFY = 3  # math-symbolic equivalence via HuggingFace `math_verify` (use for big-math etc.)
 
-
-def _math_verify_equal(prediction, ground_truth) -> float:
-    """math_verify-based correctness for big-math-style numeric/symbolic answers.
-
-    Lazily import math_verify so EXACT/F1 paths don't pay the SymPy import cost
-    on QA datasets that don't need it.
-    """
-    if prediction is None:
-        return 0.0
-    try:
-        from math_verify import parse as _mv_parse, verify as _mv_verify
-        parsed_pred = _mv_parse(str(prediction))
-        # gold passed raw; math_verify.verify handles raw strings + parsed expressions.
-        return 1.0 if bool(_mv_verify(str(ground_truth), parsed_pred, timeout_seconds=5)) else 0.0
-    except Exception:
-        return 0.0
-
-
-def math_verify_aliases(prediction, aliases) -> float:
-    if prediction is None or not aliases:
-        return 0.0
-    return max(_math_verify_equal(prediction, a) for a in aliases)
 
 # Taken from official TriviaQA evaluation code 
 # https://github.com/mandarjoshi90/triviaqa/blob/master/evaluation/triviaqa_evaluation.py
@@ -107,8 +84,6 @@ def is_answer_correct(prediction: Optional[str], aliases: List[str], metric: Met
         result = exact_match_aliases(prediction, aliases)
     elif metric == Metric.F1:
         result = f1_score_aliases(prediction, aliases)
-    elif metric == Metric.MATH_VERIFY:
-        result = math_verify_aliases(prediction, aliases)
 
     return result > threshold
 

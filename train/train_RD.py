@@ -168,7 +168,7 @@ def terminator_ids(tokenizer, chat_end_markers):
 # F1@0.5 on the datasets with free-form answers; upstream RD scores its PPO
 # reward by exact match
 def get_metric_and_threshold(dataset_name: str):
-    if dataset_name in {"triviaqa", "qampari", "hotpotqa", "hotpotqa_context"}:
+    if dataset_name in {"triviaqa", "hotpotqa", "hotpotqa_context"}:
         return Metric.F1, 0.5
     return Metric.EXACT, 0.5
 
