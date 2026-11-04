@@ -457,7 +457,7 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
           rollout_max_new_tokens: int = 256, rollout_temperature: float = 0.6,
           rollout_top_p: float = 0.9, chat_template_kwargs=None, lora=None,
           system_prompt: str | None = None, confidence_stop: bool = False,
-          kl_horizon: int = 10000, max_grad_norm: float | None = None,
+          kl_horizon: int = 10000, max_grad_norm: float | None = None, seed: int = 42,
           strict_format: bool = False,
           ppo_early_stopping: bool = False, ppo_target_kl: float = 1.0,
           ppo_mini_batch_size: int | None = None, ppo_gradient_accumulation_steps: int = 1,
@@ -524,6 +524,8 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
         max_grad_norm=max_grad_norm,
         early_stopping=ppo_early_stopping,
         target_kl=ppo_target_kl,
+        # PPOTrainer reseeds everything from this; TRL's default is 0
+        seed=int(seed),
     )
 
     ppo_trainer = PPOTrainerNoCache(
@@ -923,6 +925,7 @@ def main():
         reward_log_interval=int(train_cfg["reward_log_interval"]),
         debug_sample_log_interval=int(train_cfg.get("debug_sample_log_interval", 100)),
         shuffle_seed=int(train_cfg["shuffle_seed"]),
+        seed=int(cfg["seed"]),
         eval_every_steps=int(train_cfg["eval_every_steps"]),
         save_every_steps=int(train_cfg["save_every_steps"]),
         resume_state_path=args.resume_state_path,

@@ -154,7 +154,8 @@ def _sample_removed_titles(example, rng: random.Random) -> Tuple[int, List[str]]
     # evidence; the formal evaluation (csr/data.py) keeps them all
     supporting = list(example["supporting_facts"]["title"])
     all_titles = list(example["context"]["title"])
-    non_supporting = list(set(all_titles) - set(supporting))
+    # sorted: set order follows the per-process string hash, so the draw would not repeat
+    non_supporting = sorted(set(all_titles) - set(supporting))
 
     choice = rng.choice([0, 1, 2])
     try:
