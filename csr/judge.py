@@ -221,7 +221,7 @@ class Judge:
 
         # one pool over all pending verdicts; a pool per chunk idles on each tail
         in_flight_cap = max(int(self.batch_size), 4 * self.max_workers)
-        for _ in range(self.max_retries):
+        for _ in range(max(1, self.max_retries)):
             if not pending:
                 break
             still_pending: list[int] = []

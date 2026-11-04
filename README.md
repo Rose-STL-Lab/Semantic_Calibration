@@ -67,7 +67,7 @@ The default judge is GPT-4.1-nano on the OpenAI API. To use it, export your key:
 export OPENAI_API_KEY=sk-...
 ```
 
-To use a local judge instead, serve any model that vLLM supports. The paper uses
+To use a local judge instead, serve any model that vLLM supports, for example
 gpt-oss-20b. Start the server on its own GPU:
 
 ```bash
@@ -89,13 +89,13 @@ other models, keep only `base_url` and `model_id`. Every command below that call
 judge includes `$JUDGE`. With the OpenAI API, leave `JUDGE` unset and it expands to
 nothing.
 
-To compare two answers by token F1 instead of asking the judge, add the flags below
+To compare two answers by token F1 instead of asking the judge, add the flag below
 after `$JUDGE` in CSR training and in `evaluation/eval_semantic.py`. Correctness is
-still judged by the LLM. The paper uses a threshold of 0.50 for `llama` and `mistral`
-and 0.80 for `qwen`.
+still judged by the LLM. The F1 threshold defaults to the paper's value, 0.80 for
+`qwen` and 0.50 for `llama` and `mistral`.
 
 ```bash
---set judge.equivalence=f1 --set judge.f1_threshold=0.80
+--set judge.equivalence=f1
 ```
 
 ## 3. Datasets and Configs
@@ -158,17 +158,14 @@ always trains on HotpotQA prompts that include the supporting paragraphs, whethe
 python train/train_RLCR.py --model qwen --dataset hotpot --exp-name RLCR_qwen_hotpot $JUDGE
 ```
 
-**RD** follows the upstream Rewarding Doubt release and runs in `csr-rd`. The paper's RD
-results use the flags below. For `qwen32b`, also add
-`--set method.train.ppo_mini_batch_size=2 --set method.train.ppo_gradient_accumulation_steps=2`
+**RD** follows the upstream Rewarding Doubt release and runs in `csr-rd`. The defaults in
+`configs/methods/rd.yaml` are the settings the paper's RD results use. For `qwen32b`,
+also add `--set method.train.ppo_mini_batch_size=2 --set method.train.ppo_gradient_accumulation_steps=2`
 to fit in memory.
 
 ```bash
 conda activate csr-rd
-python train/train_RD.py --model qwen --dataset hotpot --exp-name RD_qwen_hotpot \
-  --set method.train.confidence_stop=true --set method.train.strict_format=true \
-  --set method.train.learning_rate=1e-5 --set method.train.batch_size=8 \
-  --set method.train.ppo_temperature=1.0 --set method.train.ppo_repetition_penalty=1.0
+python train/train_RD.py --model qwen --dataset hotpot --exp-name RD_qwen_hotpot
 conda activate csr
 ```
 

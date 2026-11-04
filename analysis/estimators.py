@@ -207,7 +207,7 @@ def print_markdown(table: dict, k: int) -> None:
 
 
 def print_latex(table: dict, k: int) -> None:
-    print(f"% Table 6 body, K={k}, gpt-oss-20b judge")
+    print(f"% Table 6 body, K={k}")
     for name in ESTIMATORS:
         print(f"% ---- {name} ----")
         for model in MODELS:

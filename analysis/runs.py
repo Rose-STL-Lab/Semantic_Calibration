@@ -18,11 +18,11 @@ MODEL_LABELS = {"llama8b": "Llama", "qwen7b": "Qwen", "mistral7b": "Mistral"}
 # K=16 where confidence comes from the rollout spread; greedy (k1) for the two
 # that verbalize one.
 RUN_TEMPLATES = {
-    "Base": "Base_{model}_{dataset}_base_oss_k16",
-    "RLVR": "RLVR_{model}_{dataset}_step2500_oss_k16",
-    "RD": "RD_{model}_{dataset}_b8_step1250_oss_k1",
-    "RLCR": "RLCR_{model}_{dataset}_step2500_oss_k1",
-    "CSR": "CSR_{model}_{dataset}_z10_step2500_oss_k16",
+    "Base": "Base_{model}_{dataset}_base_nano_k16",
+    "RLVR": "RLVR_{model}_{dataset}_step2500_nano_k16",
+    "RD": "RD_{model}_{dataset}_b8_step1250_nano_k1",
+    "RLCR": "RLCR_{model}_{dataset}_step2500_nano_k1",
+    "CSR": "CSR_{model}_{dataset}_z10_step2500_nano_k16",
 }
 
 # confidence from semantic dispersion, not read off a verbalized scalar

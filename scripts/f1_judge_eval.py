@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Rebuild F1-train + F1-eval runs by reclustering saved rollouts; sources untouched.
-# Rollouts are not regenerated and correctness stays the existing gpt-oss-20b
+# Rollouts are not regenerated and correctness stays the existing judge
 # labels, so only confidence and clusters change. Output: a separate *_semf1_k16 dir.
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ def main() -> None:
         "definition": (
             "F1-trained CSR checkpoint; existing K=16 rollouts reclustered with "
             "the same model-family F1 threshold; correctness labels retained "
-            "from gpt-oss-20b"
+            "from the source run's judge"
         ),
         "runs": [],
         "macro_averages": {},
@@ -80,8 +80,8 @@ def main() -> None:
         threshold = float(cfg["threshold"])
         model_rows = []
         for dataset in args.datasets:
-            source_name = f"CSR_{model}_{dataset}_f1eq{tag}_step2500_oss_k16"
-            target_name = f"CSR_{model}_{dataset}_f1eq{tag}_step2500_oss_semf1_k16"
+            source_name = f"CSR_{model}_{dataset}_f1eq{tag}_step2500_nano_k16"
+            target_name = f"CSR_{model}_{dataset}_f1eq{tag}_step2500_nano_semf1_k16"
             source_path = RESULTS / source_name / "results.json"
             target_path = RESULTS / target_name / "results.json"
             if not source_path.exists():
@@ -141,7 +141,7 @@ def main() -> None:
                     "avg_prompt_tokens": original_summary.get("avg_prompt_tokens"),
                     "avg_total_tokens": original_summary.get("avg_total_tokens"),
                     "judge": {
-                        "model_id": "gpt-oss-20b + f1-equivalence",
+                        "model_id": "gpt-4.1-nano + f1-equivalence",
                         "correctness": original_summary["judge"]["correctness"],
                         "semantic_equivalence": {
                             "backend": "f1",
@@ -175,7 +175,7 @@ def main() -> None:
                 "f1_comparison": ">=",
                 "rollouts_regenerated": False,
                 "correctness_rejudged": False,
-                "correctness_judge": "gpt-oss-20b",
+                "correctness_judge": "gpt-4.1-nano",
             }
             derived["summary"] = summary
             derived["records"] = records

@@ -30,6 +30,19 @@ class RunDir:
         self._meta: dict = {}
         self._records: list[dict] = []
 
+    def check_resume(self, checkpoint: str | None) -> None:
+        # a run directory holds one checkpoint's records; resuming it with another
+        # checkpoint would report the first one's results under the second's name
+        try:
+            with open(self.results_path, encoding="utf-8") as fh:
+                stored = json.load(fh).get("checkpoint")
+        except (OSError, ValueError):
+            return
+        if stored is not None and stored != (checkpoint or "base"):
+            raise SystemExit(
+                f"{self.results_path} holds records for checkpoint {stored!r}, not "
+                f"{checkpoint or 'base'!r}; pass --fresh or a different --exp-name")
+
     def save_config(self, cfg, checkpoint: str | None = None) -> None:
         # also remembers method/model/dataset/checkpoint for results.json
         dump_config(cfg, self.config_path)

@@ -12,18 +12,18 @@ method:
     scale: 10.0               # divide the parsed integer by this to get [0,1]
 
   train:
-    learning_rate: 1.41e-5
+    learning_rate: 1.0e-5
     epochs: 1
-    batch_size: 4
+    batch_size: 8
     max_seq_length: 1048
     max_train_samples: 10000
     max_validation_samples: 1000
     max_eval_train_samples: 1000
-    save_every_steps: 125      # checkpoint cadence (10 checkpoints at the paper recipe, batch_size 8) -- independent of eval below
-    # Mid-training validation on the eval split, skipped at the last step. 125 is
-    # 0.1 epoch at the paper recipe (batch_size 8, 1250 steps). 0, or more steps
-    # than the run, turns it off; checkpoints are saved every save_every_steps
-    # either way and can be scored afterwards with evaluation/eval_verbalized.py.
+    save_every_steps: 125      # checkpoint cadence, 10 checkpoints over the 1250-step run
+    # Mid-training validation on the eval split, every 0.1 epoch (1250 steps per
+    # epoch) and skipped at the last step. 0, or more steps than the run, turns it
+    # off; checkpoints are saved every save_every_steps either way and can be
+    # scored afterwards with evaluation/eval_verbalized.py.
     eval_every_steps: 125
     reward_log_interval: 10
     shuffle_seed: 42
@@ -33,15 +33,14 @@ method:
     # on. null is upstream: each model's own generation_config applies (qwen 0.7,
     # llama 0.6, mistral 1.0) although PPO scores the samples at 1.0. 1.0 samples
     # from the policy being optimized, the same for every model.
-    ppo_temperature: null
+    ppo_temperature: 1.0
     # Explicitly disable Qwen2.5's inherited repetition_penalty 1.05: PPO scores
     # unpenalized logits. Set null only to reproduce the legacy sampler.
     ppo_repetition_penalty: 1.0
 
     # Stop stage 1 at " Confidence" as upstream does, so the PPO response is the
-    # confidence and that token receives the gradient. false reproduces the
-    # released checkpoints, whose stage 1 ran to EOS instead.
-    confidence_stop: false
+    # confidence and that token receives the gradient. false lets stage 1 run to EOS.
+    confidence_stop: true
 
     # TRL's adaptive KL controller moves kl_coef by (kl/target - 1) * step/horizon per
     # step. At the default 10000 it barely reacts on the ~50-step scale on which a
@@ -56,8 +55,8 @@ method:
     # Training parser without the independent-field fallback, as upstream's single
     # regex: "Answer: Confidence: 0" and period-separated refusals become format
     # failures (-30) instead of the +10 a wrong answer earns at confidence 0. Comma
-    # and newline separators and 0-1 decimals are still accepted.
-    strict_format: false
+    # and newline separators are accepted.
+    strict_format: true
 
     # TRL's per-step early stop on the policy KL between PPO epochs.
     ppo_early_stopping: false

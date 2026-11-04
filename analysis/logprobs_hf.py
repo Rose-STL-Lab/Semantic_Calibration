@@ -25,9 +25,9 @@ CKPT = {
     "CSR": "ckpt/CSR/{m}/checkpoint-2500",
 }
 EXP = {
-    "Base": "Base_{m}_{d}_base_oss_k16",
-    "RLVR": "RLVR_{m}_{d}_step2500_oss_k16",
-    "CSR": "CSR_{m}_{d}_z10_step2500_oss_k16",
+    "Base": "Base_{m}_{d}_base_nano_k16",
+    "RLVR": "RLVR_{m}_{d}_step2500_nano_k16",
+    "CSR": "CSR_{m}_{d}_z10_step2500_nano_k16",
 }
 # --model takes the config key; results/ and ckpt/ use the yaml's ckpt_name
 from csr.config import MODELS

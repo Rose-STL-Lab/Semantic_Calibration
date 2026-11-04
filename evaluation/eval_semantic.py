@@ -102,6 +102,8 @@ def main():
         exp_name = args.exp_name or default_exp_name(cfg, checkpoint)
 
         run = RunDir(cfg["paths"]["results"], exp_name)
+        if not args.fresh:
+            run.check_resume(checkpoint)
         run.save_config(cfg, checkpoint=checkpoint)
         if args.fresh:
             run.reset_records()
