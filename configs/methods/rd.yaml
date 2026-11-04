@@ -57,8 +57,8 @@ method:
     ppo_mini_batch_size: null
     ppo_gradient_accumulation_steps: 1
 
-    # Generate one prompt at a time (no padding). Needed for long-context sets, where
-    # unsloth's batched inference corrupts left-padded rows. false is upstream.
+    # Generate one prompt at a time (no padding) instead of batching. false is upstream
+    # and what the paper's runs used.
     unpadded_generation: false
 
     # sampling for the periodic train/validation generations, not the PPO rollouts

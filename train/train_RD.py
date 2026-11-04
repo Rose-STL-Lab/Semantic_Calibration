@@ -123,7 +123,6 @@ def sample_without_cache(model, tokenizer, ids, *, max_new_tokens: int, temperat
                          top_p: float, stop_ids, value_stop=None):
     """Sample without KV cache, one full forward per token.
 
-    Works around unsloth's fast generate corrupting some long-prompt continuations.
     Same semantics as generate(do_sample=True, top_k=0) with nucleus top_p.
     """
     seq = ids[None] if ids.dim() == 1 else ids
@@ -652,8 +651,7 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
                 StoppingCriteriaList([StopAtConfidence(tokenizer, int(input_ids.shape[1]))])
                 if word_stop else None)
             if unpadded_generation:
-                # one prompt at a time, unpadded: unsloth's batched inference corrupts
-                # left-padded rows on long prompts (hotpot_context)
+                # one prompt at a time, unpadded
                 prediction = []
                 for i in range(len(input_ids)):
                     row = input_ids[i][attention_mask[i].bool()][None]
