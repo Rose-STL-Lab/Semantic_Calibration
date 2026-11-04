@@ -1,5 +1,4 @@
-# Run directories for the appendix scripts:
-# <METHOD>_<backbone>_<dataset>[_<arm>]_<step>_<judge>_k<K>.
+# Run directories read by the appendix scripts; README Section 5 writes these names.
 
 from __future__ import annotations
 

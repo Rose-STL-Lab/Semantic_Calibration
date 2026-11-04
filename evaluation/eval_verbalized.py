@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Verbalized-confidence evaluation for RD and RLCR.
+r"""Verbalized-confidence evaluation for RD and RLCR.
 
 One greedy generation per question; confidence is parsed from the model's own
 output (RD: ``Answer: …, Confidence: <0-10>``; RLCR: ``<confidence>…</confidence>``)
@@ -17,7 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from csr.config import add_common_args, default_exp_name, load_config, seed_everything
+from csr.config import add_common_args, load_config, seed_everything
 from csr.parsing import UNPARSED_CONFIDENCE
 
 VERBALIZED_METHODS = {"RD", "RLCR"}
@@ -56,8 +56,9 @@ def main():
     from csr.generation import count_tokens, generate
     from csr.judge import make_judge
     from csr.metrics import summarize
-    from csr.modeling import checkpoint_step, load_for_eval, resolve_checkpoints
-    from csr.results import RunDir, print_summary
+    from csr.modeling import load_for_eval
+    from csr.results import (RunDir, checkpoint_step, print_summary, resolve_checkpoints,
+                             run_name)
     from csr.generation import render_generation_prompt
     from csr.parsing import parse_verbalized_output
 
@@ -72,13 +73,14 @@ def main():
     checkpoints = resolve_checkpoints(args.ckpt)
     dataset = load_split(cfg, split="eval")
 
+    # one model load; each checkpoint's adapter is attached as a lora_request
+    model, tokenizer, _ = load_for_eval(cfg, int(eval_cfg["max_seq_length"]), checkpoint=None)
+
     for checkpoint in checkpoints:
-        # reloaded per checkpoint; the LoRA adapter comes back as lora_request
-        model, tokenizer, lora_request = load_for_eval(
-            cfg, int(eval_cfg["max_seq_length"]), checkpoint=checkpoint)
+        lora_request = model.load_lora(os.path.abspath(checkpoint)) if checkpoint else None
 
         tag = os.path.basename(checkpoint.rstrip("/")) if checkpoint else "BASE"
-        exp_name = args.exp_name or default_exp_name(cfg, checkpoint)
+        exp_name = run_name(args.exp_name, cfg, checkpoint, len(checkpoints))
 
         run = RunDir(cfg["paths"]["results"], exp_name)
         if not args.fresh:
@@ -173,7 +175,6 @@ def main():
         print_summary(summary, title=exp_name)
         print(f"[saved] {path}")
 
-        del model
 
 
 if __name__ == "__main__":

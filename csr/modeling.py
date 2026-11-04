@@ -104,6 +104,3 @@ def load_for_eval(cfg, max_seq_length: int, checkpoint: str | None = None):
     model = model.eval()
     return model, tokenizer, lora_request
 
-
-# these live in results.py so the judge-only phase can reach them without unsloth
-from .results import checkpoint_step, resolve_checkpoints  # noqa: E402,F401

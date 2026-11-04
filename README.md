@@ -75,14 +75,14 @@ JUDGE="--set judge.base_url=http://127.0.0.1:8310/v1 --set judge.model_id=gpt-os
        --set judge.reasoning_effort=low --set judge.max_tokens=1024"
 ```
 
-`judge.model_id` is the last part of the model name. `reasoning_effort` and `max_tokens`
-apply to reasoning models only. The commands below include `$JUDGE`; with the OpenAI API,
+`judge.model_id` is the last part of the model name. `reasoning_effort` and the larger
+`max_tokens` are for reasoning models; other models need only `base_url` and `model_id`. The commands below include `$JUDGE`; with the OpenAI API,
 leave it unset.
 
 **Token-F1 equivalence.** Adding `--set judge.equivalence=f1` to CSR training or
 `eval_semantic.py` compares rollouts by token F1 instead of the judge. Correctness is
-still judged by the LLM. The threshold defaults to the paper's value: 0.80 for `qwen`,
-0.50 for `llama` and `mistral`.
+still judged by the LLM. The threshold defaults to the paper's value: 0.80 for `qwen` and
+0.50 for the other models.
 
 ## 3. Configuration
 
@@ -141,22 +141,23 @@ The defaults in `configs/methods/` reproduce the paper. A few notes:
 
 ## 5. Evaluation
 
-Each evaluation writes `results/<exp-name>/{config.yaml,results.json,results.csv}`. The
-default name is `<METHOD>_<model>_<dataset>_<checkpoint>`, e.g.
-`CSR_qwen_trivia_checkpoint-2500`. Use a name different from the training run, whose
-directory already holds its logs. An interrupted run resumes from its saved records;
-`--fresh` starts over.
+Each evaluation writes `results/<exp-name>/{config.yaml,results.json,results.csv}`.
+Without `--exp-name`, the name is `<METHOD>_<model>_<dataset>_<checkpoint>`, e.g.
+`CSR_qwen_trivia_checkpoint-2500`. The commands below pass the names that the analysis
+scripts in Section 6 look for; any other name works too, as long as it differs from the
+training run's. An interrupted run resumes from its saved records; `--fresh` starts over.
 
 **Base, RLVR and CSR** sample $K = 16$ rollouts per question (training uses $K = 8$) and
 compute $c(x)$ from them. `Base` takes no `--ckpt`.
 
 ```bash
 for ds in hotpot trivia msmarco nq_open; do
-  python evaluation/eval_semantic.py --method Base --model qwen --dataset $ds $JUDGE
+  python evaluation/eval_semantic.py --method Base --model qwen --dataset $ds $JUDGE \
+    --exp-name Base_qwen7b_${ds}_base_nano_k16
   python evaluation/eval_semantic.py --method CSR  --model qwen --dataset $ds $JUDGE \
-    --ckpt ckpt/CSR/CSR_qwen_hotpot/checkpoint-2500
+    --ckpt ckpt/CSR/CSR_qwen_hotpot/checkpoint-2500 --exp-name CSR_qwen7b_${ds}_z10_step2500_nano_k16
   python evaluation/eval_semantic.py --method RLVR --model qwen --dataset $ds $JUDGE \
-    --ckpt ckpt/RLVR/RLVR_qwen_hotpot/checkpoint-2500
+    --ckpt ckpt/RLVR/RLVR_qwen_hotpot/checkpoint-2500 --exp-name RLVR_qwen7b_${ds}_step2500_nano_k16
 done
 ```
 
@@ -166,9 +167,9 @@ from the output.
 ```bash
 for ds in hotpot trivia msmarco nq_open; do
   python evaluation/eval_verbalized.py --method RLCR --model qwen --dataset $ds $JUDGE \
-    --ckpt ckpt/RLCR/RLCR_qwen_hotpot/checkpoint-2500
+    --ckpt ckpt/RLCR/RLCR_qwen_hotpot/checkpoint-2500 --exp-name RLCR_qwen7b_${ds}_step2500_nano_k1
   python evaluation/eval_verbalized.py --method RD   --model qwen --dataset $ds $JUDGE \
-    --ckpt ckpt/RD/RD_qwen_hotpot/model_finetuned_step_1250
+    --ckpt ckpt/RD/RD_qwen_hotpot/model_finetuned_step_1250 --exp-name RD_qwen7b_${ds}_b8_step1250_nano_k1
 done
 ```
 
@@ -184,18 +185,20 @@ judge.
 | `analysis/selective.py` | Selective prediction (AURAC, AUGRC) and confidence parse rates (`--table selective\|parse\|all`) |
 | `scripts/f1_judge_eval.py` | Token-F1 re-clustering of saved CSR-F1 rollouts |
 
-Semantic Density and `clf-pairs+gen` also need the mean token log-probability of each
-rollout. `analysis/logprobs_hf.py` computes it once per run, on a GPU:
+Semantic Density and `clf-pairs+gen` also use the mean token log-probability of each
+rollout (without it they fall back to uniform weights and drop the `+gen` feature).
+`analysis/logprobs_hf.py` computes it once per run, on a GPU:
 
 ```bash
 python analysis/logprobs_hf.py --model qwen --method CSR \
   --ckpt ckpt/CSR/CSR_qwen_hotpot/checkpoint-2500 --datasets hotpot trivia msmarco nq_open
 ```
 
-The scripts find runs through name templates such as `CSR_{model}_{dataset}_z10_step2500_nano_k16`,
-where `{model}` is a backbone tag (`llama8b`, `qwen7b`, `mistral7b`). The templates are
-defined in `analysis/runs.py`, `analysis/logprobs_hf.py` and `scripts/f1_judge_eval.py`;
-edit them to match your `--exp-name`s.
+The scripts find runs through the name templates used in Section 5, such as
+`CSR_{model}_{dataset}_z10_step2500_nano_k16`, where `{model}` is a backbone tag
+(`llama8b`, `qwen7b`, `mistral7b`). The templates are defined in `analysis/runs.py`,
+`analysis/logprobs_hf.py` and `scripts/f1_judge_eval.py`; edit them if you name runs
+differently.
 
 ## Citation
 

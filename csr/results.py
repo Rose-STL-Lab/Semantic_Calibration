@@ -9,7 +9,7 @@ import os
 import time
 from typing import Iterable
 
-from .config import dump_config
+from .config import default_exp_name, dump_config
 
 # per-question fields repeat on every rollout row, so a row is self-contained
 _QUESTION_FIRST = ("idx", "question", "gold_answers")
@@ -38,7 +38,7 @@ class RunDir:
                 stored = json.load(fh).get("checkpoint")
         except (OSError, ValueError):
             return
-        if stored is not None and stored != (checkpoint or "base"):
+        if stored is not None and _same_checkpoint(stored, checkpoint) is False:
             raise SystemExit(
                 f"{self.results_path} holds records for checkpoint {stored!r}, not "
                 f"{checkpoint or 'base'!r}; pass --fresh or a different --exp-name")
@@ -132,6 +132,22 @@ def write_rows_csv(path: str, rows) -> None:
         for row in rows:
             writer.writerow({k: _csvable(row.get(k)) for k in ordered})
     os.replace(tmp, path)
+
+
+def _same_checkpoint(stored: str, checkpoint: str | None) -> bool:
+    def norm(p):
+        return "base" if p in (None, "base") else os.path.realpath(p)
+    return norm(stored) == norm(checkpoint)
+
+
+def run_name(exp_name: str | None, cfg, checkpoint: str | None, n_checkpoints: int) -> str:
+    # one results dir per checkpoint: an explicit --exp-name gets the checkpoint
+    # name appended when several checkpoints are evaluated in one call
+    if not exp_name:
+        return default_exp_name(cfg, checkpoint)
+    if n_checkpoints > 1 and checkpoint:
+        return f"{exp_name}_{os.path.basename(checkpoint.rstrip('/'))}"
+    return exp_name
 
 
 def _describe(exp_name: str, cfg, checkpoint: str | None) -> dict:

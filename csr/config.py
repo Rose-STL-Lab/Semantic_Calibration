@@ -104,15 +104,14 @@ def load_config(
 
 
 def checkpoint_dir(cfg: dict, exp_name: str | None = None) -> str:
-    # ckpt/<METHOD>/<ckpt_name>, where ckpt_name is llama8b/qwen7b/mistral7b, not the
-    # config key. exp_name replaces the model segment so two variants cannot collide.
+    # ckpt/<METHOD>/<exp_name>, or ckpt/<METHOD>/<ckpt_name> (llama8b, qwen7b, ...)
+    # without --exp-name, in which case runs on different datasets share it
     leaf = exp_name or cfg["model"].get("ckpt_name") or cfg["model"]["name"]
     return os.path.join(cfg["paths"]["ckpt"], str(cfg["method"]["name"]), str(leaf))
 
 
 def default_exp_name(cfg: dict, checkpoint: str | None = None) -> str:
-    # only when --exp-name is absent (CSR_qwen_trivia_checkpoint-2500); results/ dirs
-    # are named explicitly -- the two conventions are not interchangeable
+    # evaluation run name when --exp-name is absent, e.g. CSR_qwen_trivia_checkpoint-2500
     parts = [cfg["method"]["name"], cfg["model"]["name"], cfg["dataset"]["name"]]
     if checkpoint:
         parts.append(os.path.basename(str(checkpoint).rstrip("/")))
@@ -135,7 +134,8 @@ def add_common_args(parser: argparse.ArgumentParser, *, with_method: bool = True
                         default=dataset_default, choices=dataset_choices or DATASETS,
                         help="dataset (configs/datasets/<dataset>.yaml)")
     parser.add_argument("--exp-name", dest="exp_name", default=None,
-                        help="results/<exp_name>/; defaults to METHOD_model_dataset_ckpt")
+                        help="run name for results/<exp_name>/ (and ckpt/<METHOD>/<exp_name>/ "
+                             "when training)")
     parser.add_argument("--set", dest="overrides", action="append", default=[],
                         metavar="KEY.PATH=VALUE",
                         help="override any config value, repeatable "

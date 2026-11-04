@@ -66,7 +66,9 @@ class CalibrationRampCallback(TrainerCallback):
         self.rewards = reward_computer
         self.print_every_steps = 25
 
-    def on_step_end(self, args, state, control, **kwargs):
+    # set before each step from global_step, so a resumed run continues the schedule
+    # and the value logged for a step is the one it trained with
+    def on_step_begin(self, args, state, control, **kwargs):
         progress = 0.0
         if state.max_steps and state.max_steps > 0:
             progress = float(state.global_step) / float(state.max_steps)

@@ -7,12 +7,18 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import sys
 import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Sequence
 
+import openai
 from openai import AzureOpenAI, OpenAI
+
+# a wrong key, model id or permission fails every call; stop instead of scoring all 0
+_FATAL_ERRORS = (openai.AuthenticationError, openai.PermissionDeniedError,
+                 openai.NotFoundError)
 
 from .parsing import canonicalize_answer, sanitize_for_judge
 
@@ -197,37 +203,44 @@ class Judge:
             return (labels, 0, []) if return_missing else (labels, 0)
 
         def judge_one(idx: int):
-            text = ""
+            error = None
             for attempt in range(self.max_retries + 1):
                 try:
-                    text = self._call_once(messages[idx])
-                    break
-                except Exception:
-                    if attempt >= self.max_retries:
-                        text = ""
-                        break
-                    time.sleep(self.sleep_sec)
-            return idx, parse_yes_no(text)
+                    return idx, parse_yes_no(self._call_once(messages[idx])), None
+                except _FATAL_ERRORS:
+                    raise
+                except Exception as exc:
+                    error = exc
+                    if attempt < self.max_retries:
+                        time.sleep(self.sleep_sec)
+            return idx, None, error
 
+        # a failed request is retried inside judge_one; an unreadable reply gets
+        # max(1, max_retries) passes in total
         in_flight_cap = max(int(self.batch_size), 4 * self.max_workers)
+        stats["total"] += len(pending)
         for _ in range(max(1, self.max_retries)):
             if not pending:
                 break
             still_pending: list[int] = []
+            first_error = None
             workers = min(self.max_workers, len(pending)) or 1
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 for start in range(0, len(pending), in_flight_cap):
                     window = pending[start:start + in_flight_cap]
                     futures = [pool.submit(judge_one, idx) for idx in window]
                     for future in as_completed(futures):
-                        idx, verdict = future.result()
-                        stats["total"] += 1
+                        idx, verdict, error = future.result()
                         if verdict is None:
                             still_pending.append(idx)
+                            first_error = first_error or error
                             continue
                         labels[idx] = int(verdict)
                         stats["parsed_yes" if verdict == 1 else "parsed_no"] += 1
                         self.cache.set_item(keys[idx], int(verdict))
+            if first_error is not None:
+                print(f"[judge] {len(still_pending)} calls failed, e.g. "
+                      f"{type(first_error).__name__}: {first_error}", file=sys.stderr, flush=True)
             pending = still_pending
 
         unparsed = len(pending)

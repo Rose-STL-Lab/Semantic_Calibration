@@ -11,7 +11,7 @@ judge:
   model_id: gpt-4.1-nano
   temperature: 0.0
   max_tokens: 16             # the prompts answer with one word
-  max_retries: 2
+  max_retries: 2             # passes over unreadable replies; also retries per failed request
   sleep_sec: 1.5
   # the SDK default (600 s) lets one stalled request hold up a batch
   request_timeout_sec: 20

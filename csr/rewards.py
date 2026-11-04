@@ -60,8 +60,9 @@ class RewardComputer:
         self.cali_w_sigmoid_slope = float(train_cfg.get("cali_w_sigmoid_slope", 10.0))
         if self.cali_w_schedule not in ("linear", "sigmoid"):
             raise ValueError(f"unknown method.train.cali_w_schedule "
-                             f"{self.cali_w_schedule!r}; expected linear or sigmoid "
-                             f"(equal endpoints already give a constant weight)")
+                             f"{self.cali_w_schedule!r}; expected linear or sigmoid")
+        if self.cali_w_sigmoid_slope <= 0:
+            raise ValueError("method.train.cali_w_sigmoid_slope must be positive")
         self.cali_w = self.cali_w_start
         self._verdict_cache: dict[bytes, list[int]] = {}
 

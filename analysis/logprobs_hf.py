@@ -1,9 +1,11 @@
-"""Scores answers with a plain transformers forward pass.
+r"""Scores answers with a plain transformers forward pass.
 
 Writes ``logprobs_hf.json`` per run, which aggregation.py and estimators.py read.
 
     python analysis/logprobs_hf.py --model llama --method Base \
         --datasets hotpot trivia msmarco nq_open
+    python analysis/logprobs_hf.py --model qwen --method CSR \
+        --ckpt ckpt/CSR/CSR_qwen_hotpot/checkpoint-2500
 """
 
 from __future__ import annotations
@@ -18,11 +20,6 @@ sys.path.insert(0, str(ROOT))
 from csr.config import MODELS  # noqa: E402
 
 RESULTS = ROOT / "results"
-CKPT = {
-    "Base": None,
-    "RLVR": "ckpt/RLVR/{m}/checkpoint-2500",
-    "CSR": "ckpt/CSR/{m}/checkpoint-2500",
-}
 EXP = {
     "Base": "Base_{m}_{d}_base_nano_k16",
     "RLVR": "RLVR_{m}_{d}_step2500_nano_k16",
@@ -58,7 +55,6 @@ def load_hf_policy(cfg, adapter: str | None, load_in_4bit: bool):
 def score_batch(model, tokenizer, pairs, device="cuda:0"):
     # mean answer log-prob for a list of (prompt_text, answer_text)
     import torch
-    import torch.nn.functional as F
 
     # Tokenized apart on purpose: joining the strings first can merge the boundary
     # into one token and shift every answer position by one.
@@ -81,17 +77,19 @@ def score_batch(model, tokenizer, pairs, device="cuda:0"):
         mask[i, : len(f)] = 1
     ids, mask = ids.to(device), mask.to(device)
 
-    with torch.no_grad():
-        logits = model(input_ids=ids, attention_mask=mask).logits.float()
-        logprobs = F.log_softmax(logits[:, :-1], dim=-1)
-        picked = logprobs.gather(-1, ids[:, 1:].unsqueeze(-1)).squeeze(-1)
-
     out = []
-    for i, f in enumerate(enc_full):
-        # picked[j] is the log-prob of token j+1, so the answer starts at n_prompt-1
-        lo, hi = n_prompt[i] - 1, len(f) - 1
-        span = picked[i, lo:hi]
-        out.append(float(span.mean()) if span.numel() else 0.0)
+    with torch.no_grad():
+        logits = model(input_ids=ids, attention_mask=mask).logits
+        for i, f in enumerate(enc_full):
+            # logits[j] predicts token j+1, so the answer starts at n_prompt-1;
+            # only those rows go to fp32, never the full batch x vocab tensor
+            lo, hi = n_prompt[i] - 1, len(f) - 1
+            span = logits[i, :-1][lo:hi].float()
+            if not span.shape[0]:
+                out.append(0.0); continue
+            target = ids[i, 1:][lo:hi].unsqueeze(-1)
+            picked = span.gather(-1, target).squeeze(-1) - torch.logsumexp(span, dim=-1)
+            out.append(float(picked.mean()))
     return out
 
 
@@ -104,10 +102,15 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None,
                         help="only the first N questions (smoke test)")
     parser.add_argument("--ckpt", default=None,
-                        help="adapter directory; overrides the default under ckpt/")
-    parser.add_argument("--batch-seqs", type=int, default=64,
+                        help="adapter directory, e.g. ckpt/CSR/<exp-name>/checkpoint-2500; "
+                             "required unless --method Base")
+    parser.add_argument("--batch-seqs", type=int, default=16,
                         help="answers scored per forward pass")
     args = parser.parse_args()
+    if args.method == "Base" and args.ckpt:
+        parser.error("--method Base scores the plain model; drop --ckpt")
+    if args.method != "Base" and not args.ckpt:
+        parser.error(f"--method {args.method} needs --ckpt (the trained adapter directory)")
 
     from csr.config import load_config
     from csr.data import load_split
@@ -116,25 +119,33 @@ def main() -> None:
     model = tokenizer = None
     for ds in args.datasets:
         cfg = load_config(args.method, args.model, ds, [])
-        name = cfg["model"]["ckpt_name"]          # results/ and ckpt/ directory name
+        name = cfg["model"]["ckpt_name"]          # results/ directory name
         exp = EXP[args.method].format(m=name, d=ds)
         run_dir = RESULTS / exp
-        payload = json.loads((run_dir / "results.json").read_text())
+        results_path = run_dir / "results.json"
+        if not results_path.exists():
+            print(f"[skip] {exp}: no {results_path}", file=sys.stderr); continue
+        payload = json.loads(results_path.read_text())
         if payload.get("status") != "final":
-            print(f"[skip] {exp}: not final"); continue
+            print(f"[skip] {exp}: not final", file=sys.stderr); continue
         records = payload["records"][: args.limit]
 
         if model is None:
-            ckpt = args.ckpt or CKPT[args.method]
-            adapter = (str(ROOT / ckpt.format(m=name, model=name))
-                       if ckpt else None)
+            adapter = str(ROOT / args.ckpt) if args.ckpt else None
             use_4bit = bool(cfg["model"].get("load_in_4bit", True))
             model, tokenizer = load_hf_policy(cfg, adapter, use_4bit)
 
         dataset = load_split(cfg, split="eval", size=len(payload["records"]))
+        tmpl_kwargs = cfg["model"].get("chat_template_kwargs") or {}
         flat, owners = [], []
         for qi, rec in enumerate(records):
-            prompt = render_generation_prompt(dataset[int(rec["idx"])]["prompt"], tokenizer)
+            example = dataset[int(rec["idx"])]
+            if example["question"] != rec["question"]:
+                raise SystemExit(
+                    f"{exp}: record idx {rec['idx']} has question {rec['question']!r} "
+                    f"but the rebuilt eval split has {example['question']!r}; the "
+                    f"dataset or its filtering changed since this run was evaluated")
+            prompt = render_generation_prompt(example["prompt"], tokenizer, tmpl_kwargs)
             for r in rec["rollouts"]:
                 flat.append((prompt, r["full_answer"])); owners.append(qi)
 

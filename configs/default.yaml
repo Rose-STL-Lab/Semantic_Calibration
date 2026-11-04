@@ -1,7 +1,8 @@
 # Loaded first, then judge.yaml, models/<model>, methods/<method>,
 # datasets/<dataset>, then any --set overrides.
 
-# one seed for python/numpy/torch RNGs, shuffling, LoRA init, GRPO and rollout sampling
+# python/numpy/torch RNGs, data shuffling, GRPO and rollout sampling (LoRA init uses
+# model.lora.random_state; RD sizes and shuffles its data with method.train.shuffle_seed)
 seed: 42
 
 # Both are repo-relative unless absolute. The HuggingFace cache is NOT set here:

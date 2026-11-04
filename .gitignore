@@ -32,3 +32,13 @@ nohup.out
 .idea/
 .vscode/
 *.ipynb
+
+# Environments and tool caches.
+.venv/
+venv/
+wandb/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/

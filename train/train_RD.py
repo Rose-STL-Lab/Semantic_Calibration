@@ -5,8 +5,7 @@ Port of https://github.com/pasta99/RewardingDoubt (arXiv:2503.02623); rd_util/ s
 close to upstream. Needs the csr-rd env (trl 0.8.6 PPO API, from requirements-rd.txt);
 RD *evaluation* instead runs in the main env, see evaluation/eval_verbalized.py.
 
-    python train/train_RD.py --model qwen
-    python train/train_RD.py --model llama --set method.train.batch_size=8
+    python train/train_RD.py --model qwen --exp-name RD_qwen_hotpot
 """
 
 import argparse
@@ -608,6 +607,7 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
 
 
     # start_epoch_idx is absolute, so epochs is the total, not the number still to run
+    last_saved_step = -1
     for epoch in range(start_epoch_idx, epochs):
         rewards_epoch = []
         epoch_debug_acc = {
@@ -777,6 +777,7 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
                     best_reward_step=best_reward_step,
                     ckpt_dir=step_ckpt_dir,
                 )
+                last_saved_step = global_step
 
             # the final checkpoint is scored by the formal evaluation, not here
             if (eval_every_steps > 0 and global_step % eval_every_steps == 0
@@ -863,6 +864,16 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
 
         avg_reward = float(np.mean(rewards_epoch))
         print(f"Finished epoch {epoch + 1}. Average train reward: {avg_reward}")
+
+    # the run length need not be a multiple of save_every_steps
+    final_step = len(ppo_trainer.dataloader) * epochs
+    if last_saved_step < final_step:
+        final_dir = os.path.join(out_dir, f"model_finetuned_step_{final_step}")
+        ppo_trainer.save_pretrained(final_dir)
+        ppo_trainer.save_pretrained(os.path.join(out_dir, "model_finetuned"))
+        save_training_state(ppo_trainer=ppo_trainer, out_dir=out_dir, global_step=final_step,
+                            epoch_idx=epochs - 1, best_reward=best_reward,
+                            best_reward_step=best_reward_step, ckpt_dir=final_dir)
 
     print("Finished Training!")
     print(f"Best validation reward {best_reward} at step {best_reward_step}")

@@ -1,7 +1,7 @@
 # Judge server
 
-Training and evaluation reach the semantic-equivalence / correctness judge over
-HTTP, so one has to be up before any run that calls the judge.
+Serves a local judge over an OpenAI-compatible HTTP API, as an alternative to the
+hosted default (GPT-4.1-nano on the OpenAI API).
 
     bash scripts/serve/serve_judge.sh [GPU] [PORT] [MODEL]
     bash scripts/serve/serve_judge.sh 0 8310 openai/gpt-oss-20b

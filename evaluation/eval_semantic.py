@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-"""Answer-only evaluation for Base, RLVR and CSR.
+r"""Answer-only evaluation for Base, RLVR and CSR.
 
 K rollouts per question; confidence is ``exp(-SE)`` over the judge's semantic
 clusters, question accuracy the fraction of rollouts judged correct.
 
     python evaluation/eval_semantic.py --method CSR --model qwen --dataset trivia \
-        --ckpt ckpt/CSR/qwen7b/checkpoint-2500   # omit --ckpt for the frozen base
+        --ckpt ckpt/CSR/CSR_qwen_hotpot/checkpoint-2500   # omit --ckpt for the frozen base
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from csr.config import add_common_args, default_exp_name, load_config, seed_everything
+from csr.config import add_common_args, load_config, seed_everything
 
 SEMANTIC_METHODS = {"Base", "RLVR", "CSR"}
 
@@ -69,14 +69,15 @@ def main():
     from csr.generation import rollouts_with_tokens
     from csr.judge import make_judge
     from csr.metrics import summarize
-    from csr.results import RunDir, checkpoint_step, print_summary, resolve_checkpoints
+    from csr.results import (RunDir, checkpoint_step, print_summary, resolve_checkpoints,
+                             run_name)
     from csr.semantic import semantic_confidence
     from csr.generation import render_generation_prompt
     from csr.parsing import strip_prompt_prefix
 
     eval_cfg = cfg["method"]["eval"]
     markers = cfg["model"].get("chat_end_markers", [])
-    # e.g. {"enable_thinking": false} for Qwen3, {"reasoning_effort": "low"} for gpt-oss
+    # e.g. {"enable_thinking": false} for Qwen3
     tmpl_kwargs = cfg["model"].get("chat_template_kwargs") or {}
     seed = int(cfg["seed"])
     k = int(eval_cfg["num_rollouts"])
@@ -98,7 +99,7 @@ def main():
         lora_request = (model.load_lora(os.path.abspath(checkpoint))
                         if checkpoint and model is not None else None)
         tag = os.path.basename(checkpoint.rstrip("/")) if checkpoint else "BASE"
-        exp_name = args.exp_name or default_exp_name(cfg, checkpoint)
+        exp_name = run_name(args.exp_name, cfg, checkpoint, len(checkpoints))
 
         run = RunDir(cfg["paths"]["results"], exp_name)
         if not args.fresh:

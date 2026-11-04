@@ -20,7 +20,7 @@ method:
     max_validation_samples: 1000
     max_eval_train_samples: 1000
     save_every_steps: 125      # checkpoint cadence, 10 checkpoints over the 1250-step run
-    # Mid-training validation every 0.1 epoch (1250 steps), skipped at the last
+    # Mid-training validation every 0.1 epoch (125 of 1250 steps), skipped at the last
     # step; 0, or more steps than the run, turns it off.
     eval_every_steps: 125
     reward_log_interval: 10

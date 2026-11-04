@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 import re
 import string
@@ -55,9 +56,10 @@ def _confidence_of(content: str) -> float | None:
     if not raw:
         return None
     try:
-        return float(raw)
+        value = float(raw)
     except ValueError:
         return None
+    return value if math.isfinite(value) else None
 
 
 class RLCRRewards:
@@ -148,7 +150,8 @@ ANSWER_TAG_INSTRUCTION = (
 
 
 def _sample_removed_titles(example, rng: random.Random) -> Tuple[int, List[str]]:
-    # RLCR training drops paragraphs so some questions lack evidence; eval keeps them all
+    # RLCR's training and validation prompts drop paragraphs so some questions lack
+    # evidence; the formal evaluation (csr/data.py) keeps them all
     supporting = list(example["supporting_facts"]["title"])
     all_titles = list(example["context"]["title"])
     non_supporting = list(set(all_titles) - set(supporting))
@@ -196,7 +199,7 @@ def load_hotpot(cfg, split: str = "train", size: int | None = None):
 
     def convert(example):
         example_id = str(example.get("id", ""))
-        # per-example RNG so paragraph dropping is deterministic across runs
+        # per-example RNG
         rng = random.Random(seed + sum(ord(c) for c in example_id))
         problem = build_problem(example, rng)
         return {

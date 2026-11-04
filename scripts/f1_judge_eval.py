@@ -78,7 +78,6 @@ def main() -> None:
     for model, cfg in ((m, MODELS[m]) for m in args.models):
         tag = cfg["tag"]
         threshold = float(cfg["threshold"])
-        model_rows = []
         for dataset in args.datasets:
             source_name = f"CSR_{model}_{dataset}_f1eq{tag}_step2500_nano_k16"
             target_name = f"CSR_{model}_{dataset}_f1eq{tag}_step2500_nano_semf1_k16"
@@ -197,14 +196,26 @@ def main() -> None:
                 "avg_semantic_clusters": summary["avg_semantic_clusters"],
             }
             manifest["runs"].append(row)
-            model_rows.append(row)
 
-        manifest["macro_averages"][model] = {
-            key: sum(row[key] for row in model_rows) / len(model_rows)
-            for key in ("accuracy", "ece", "brier", "auroc", "avg_confidence")
-        }
+    # a --models/--datasets subset must not drop runs built earlier
+    manifest_path = RESULTS / "f1train_f1eval_manifest.json"
+    merged = {}
+    if manifest_path.exists():
+        for row in json.loads(manifest_path.read_text(encoding="utf-8")).get("runs", []):
+            merged[row["experiment"]] = row
+    for row in manifest["runs"]:
+        merged[row["experiment"]] = row
+    manifest["runs"] = list(merged.values())
 
-    write_json_atomic(RESULTS / "f1train_f1eval_manifest.json", manifest)
+    for model in MODELS:
+        model_rows = [row for row in manifest["runs"] if row["model"] == model]
+        if model_rows:
+            manifest["macro_averages"][model] = {
+                key: sum(row[key] for row in model_rows) / len(model_rows)
+                for key in ("accuracy", "ece", "brier", "auroc", "avg_confidence")
+            }
+
+    write_json_atomic(manifest_path, manifest)
     print(json.dumps(manifest["macro_averages"], indent=2))
 
 

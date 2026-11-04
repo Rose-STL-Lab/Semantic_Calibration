@@ -177,11 +177,11 @@ def collect(k: int) -> dict:
             for ds, _ in DATASETS:
                 exp = pattern.format(model=model, dataset=ds)
                 if not (RESULTS / exp / "results.json").exists():
-                    print(f"[skip] missing run: {exp}")
+                    print(f"[skip] missing run: {exp}", file=sys.stderr)
                     continue
                 per_ds[ds] = score(exp, k)
                 print(f"[done] {exp:44} " + "  ".join(
-                    f"{n}: ECE {v[0]:.4f} AUROC {v[1]:.4f}" for n, v in per_ds[ds].items()), flush=True)
+                    f"{n}: ECE {v[0]:.4f} AUROC {v[1]:.4f}" for n, v in per_ds[ds].items()), file=sys.stderr, flush=True)
             for name in ESTIMATORS:
                 cells = {ds: per_ds[ds][name] for ds in per_ds}
                 if len(cells) == len(DATASETS):
