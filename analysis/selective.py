@@ -2,7 +2,7 @@
 
 Recomputed from existing evaluation records; needs no GPU or judge.
 
-    python analysis/selective.py --table 5|12|all [--latex]
+    python analysis/selective.py --table selective|parse|all [--latex]
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def selective(conf: np.ndarray, acc: np.ndarray) -> tuple[float, float]:
     return aurac, augrc
 
 
-def table5(latex: bool) -> None:
+def selective_table(latex: bool) -> None:
     # accepted in decreasing order of the method's own confidence
     for model in MODELS:
         rows = {}
@@ -103,7 +103,7 @@ def table5(latex: bool) -> None:
             print("\\midrule")
 
 
-def table12(latex: bool) -> None:
+def parse_rate_table(latex: bool) -> None:
     # fraction whose verbalized confidence parsed and was in range
     for model in MODELS:
         if latex:
@@ -131,13 +131,13 @@ def table12(latex: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--table", choices=["5", "12", "all"], default="all")
+    parser.add_argument("--table", choices=["selective", "parse", "all"], default="all")
     parser.add_argument("--latex", action="store_true")
     args = parser.parse_args()
-    if args.table in ("5", "all"):
-        table5(args.latex)
-    if args.table in ("12", "all"):
-        table12(args.latex)
+    if args.table in ("selective", "all"):
+        selective_table(args.latex)
+    if args.table in ("parse", "all"):
+        parse_rate_table(args.latex)
 
 
 if __name__ == "__main__":

@@ -9,44 +9,42 @@ This repository contains the code for our NeurIPS 2026 paper
 
 ![Overview of CSR](assets/CSR_overview.png)
 
-**Overview of CSR.** For each question $x$ we draw $K$ rollouts from the policy
-$\pi_\theta$, score each rollout with a verifiable correctness reward
-$r_{\mathrm{RLVR}}$ and a semantic calibration reward $r_{\mathrm{Calibration}}$, and
-update the policy via group-relative advantages. CSR concentrates correct rollouts into
-a tight semantic cluster while keeping incorrect rollouts dispersed, so that semantic
-agreement among rollouts becomes an informative signal of correctness.
+**Overview.** For each question $x$, CSR draws $K$ rollouts from the policy
+$\pi_\theta$ and scores each one with a verifiable correctness reward
+$r_{\mathrm{RLVR}}$ and a semantic calibration reward $r_{\mathrm{Calibration}}$. The
+policy is updated with group-relative advantages. Training pulls correct rollouts into a
+tight semantic cluster and leaves incorrect ones dispersed, so agreement among rollouts
+becomes a signal of correctness.
 
 The confidence is $c(x) = \exp(-\mathrm{SE}(x))$, where $\mathrm{SE}$ is the semantic
-entropy of the rollouts. The model never states a confidence itself. Both reward terms
-lie in $[0, 1]$, so their weights are directly comparable.
+entropy of the rollouts. The model never states a confidence itself.
 
-| Path | What it is |
+## Repository layout
+
+| Path | Contents |
 | --- | --- |
-| `csr/` | The library: rewards, semantic clustering, judge client, config loader, metrics |
-| `train/` | One trainer per trained method: `train_CSR.py`, `train_RLVR.py`, `train_RLCR.py`, `train_RD.py` |
-| `evaluation/` | `eval_semantic.py` (Base, CSR, RLVR) and `eval_verbalized.py` (RLCR, RD) |
+| `csr/` | Library code: rewards, semantic clustering, judge client, config loader, metrics |
+| `train/` | Trainers: `train_CSR.py`, `train_RLVR.py`, `train_RLCR.py`, `train_RD.py` |
+| `evaluation/` | `eval_semantic.py` (Base, RLVR, CSR) and `eval_verbalized.py` (RLCR, RD) |
 | `configs/` | YAML settings: `default.yaml`, `judge.yaml`, `models/`, `methods/`, `datasets/` |
-| `analysis/` | Post-hoc estimators, aggregation rules and selective prediction from the appendix |
-| `scripts/` | `serve/serve_judge.sh` (local judge server) and `f1_judge_eval.py` (rebuilds the paper's token-F1 tables) |
-| `rd_util/` | Utilities for the Rewarding Doubt baseline, kept close to upstream |
+| `analysis/` | Appendix analyses: alternative estimators, aggregation rules, selective prediction |
+| `scripts/` | `serve/serve_judge.sh` (local judge server) and `f1_judge_eval.py` (token-F1 re-clustering) |
+| `rd_util/` | Rewarding Doubt baseline utilities, kept close to upstream |
 
-# Getting Started
+## 1. Installation
 
-## 1. Environment
-
-We ran all experiments on NVIDIA A100 80GB PCIe GPUs, one GPU per training or evaluation
-run, with Python 3.11.14, PyTorch 2.9.0 and CUDA 12.8. Install `torch` before the other
-packages so pip does not replace it with a different build:
+All experiments ran on NVIDIA A100 80GB GPUs, one GPU per training or evaluation run,
+with Python 3.11, PyTorch 2.9.0 and CUDA 12.8. Install `torch` first so that pip does not
+replace it with another build:
 
 ```bash
 conda create -n csr python=3.11 && conda activate csr
-pip install torch==2.9.0            # pick the build for your CUDA
+pip install torch==2.9.0            # choose the build for your CUDA
 pip install -r requirements.txt
 ```
 
-The Rewarding Doubt (RD) baseline needs Python 3.10.20, PyTorch 2.5.1 and CUDA 12.4.
-RD training therefore runs in a second environment, `csr-rd`. Everything else, including
-RD evaluation, runs in `csr`.
+RD training needs an older stack (Python 3.10, PyTorch 2.5.1, CUDA 12.4) and runs in a
+separate environment. Everything else, including RD evaluation, runs in `csr`.
 
 ```bash
 conda create -n csr-rd python=3.10 && conda activate csr-rd
@@ -57,186 +55,149 @@ pip install "transformers>=4.51.3" "unsloth>=2025.4.7"   # only for qwen14b and 
 
 ## 2. Judge
 
-An LLM judge answers two questions: whether an answer matches the gold answer, and
-whether two answers mean the same thing. CSR and RLVR training, the periodic validation
-in RLCR training, and every evaluation call the judge. RD training does not.
+An LLM judge decides whether an answer matches the gold answer and whether two answers
+mean the same thing. It is called by CSR and RLVR training, by the periodic validation in
+RLCR training, and by every evaluation. RD training does not use it.
 
-The default judge is GPT-4.1-nano on the OpenAI API. To use it, export your key:
+**OpenAI API (default).** The paper uses GPT-4.1-nano:
 
 ```bash
 export OPENAI_API_KEY=sk-...
 ```
 
-To use a local judge instead, serve any model that vLLM supports, for example
-gpt-oss-20b. Start the server on its own GPU:
+**Local server.** Any model that vLLM serves can act as the judge. Start it on its own
+GPU and run training and evaluation on another (e.g. `CUDA_VISIBLE_DEVICES=0`):
 
 ```bash
 # bash scripts/serve/serve_judge.sh <GPU> <PORT> <HuggingFace model>
 bash scripts/serve/serve_judge.sh 1 8310 openai/gpt-oss-20b
-```
-
-Training and evaluation then run on another GPU, for example `export CUDA_VISIBLE_DEVICES=0`.
-A local server needs no API key. Store the judge settings in a shell variable, with
-`judge.model_id` set to the last part of the model name:
-
-```bash
 JUDGE="--set judge.base_url=http://127.0.0.1:8310/v1 --set judge.model_id=gpt-oss-20b \
        --set judge.reasoning_effort=low --set judge.max_tokens=1024"
 ```
 
-`reasoning_effort` and `max_tokens` are for reasoning models such as gpt-oss-20b. For
-other models, keep only `base_url` and `model_id`. Every command below that calls the
-judge includes `$JUDGE`. With the OpenAI API, leave `JUDGE` unset and it expands to
-nothing.
+`judge.model_id` is the last part of the model name. `reasoning_effort` and `max_tokens`
+apply to reasoning models only. The commands below include `$JUDGE`; with the OpenAI API,
+leave it unset.
 
-To compare two answers by token F1 instead of asking the judge, add the flag below
-after `$JUDGE` in CSR training and in `evaluation/eval_semantic.py`. Correctness is
-still judged by the LLM. The F1 threshold defaults to the paper's value, 0.80 for
-`qwen` and 0.50 for `llama` and `mistral`.
+**Token-F1 equivalence.** Adding `--set judge.equivalence=f1` to CSR training or
+`eval_semantic.py` compares rollouts by token F1 instead of the judge. Correctness is
+still judged by the LLM. The threshold defaults to the paper's value: 0.80 for `qwen`,
+0.50 for `llama` and `mistral`.
 
-```bash
---set judge.equivalence=f1
-```
-
-## 3. Datasets and Configs
-
-Datasets download from the HuggingFace Hub on first use and are cached under `HF_HOME`
-(default `~/.cache/huggingface`).
+## 3. Configuration
 
 | Option | Values |
 | --- | --- |
-| Methods | `Base` `CSR` `RLVR` `RLCR` `RD` |
-| Models | `llama` `qwen` `mistral` `qwen14b` `qwen32b` |
-| Datasets | `hotpot` `trivia` `msmarco` `nq_open` `hotpot_context` `musique` `2wiki_comp` |
+| `--method` | `Base` `RLVR` `CSR` `RLCR` `RD` |
+| `--model` | `llama` `qwen` `mistral` `qwen14b` `qwen32b` |
+| `--dataset` | `hotpot` `trivia` `msmarco` `nq_open` `hotpot_context` `musique` `2wiki_comp` |
 
-`Base` is the untrained model. RLVR trains on correctness only. RLCR and RD train the
-model to state its confidence, RLCR with a Brier-score reward and RD (Rewarding Doubt)
-with a log-score reward.
+`Base` is the untrained model and RLVR trains on correctness alone. RLCR and RD train the
+model to state its confidence, with a Brier-score and a log-score reward respectively.
 
-The main results train on `hotpot` and evaluate on `hotpot`, `trivia`, `msmarco` and
-`nq_open`. The context experiments train on `hotpot_context` and evaluate on
-`hotpot_context`, `musique` and `2wiki_comp`.
+- **Main results:** train on `hotpot`; evaluate on `hotpot`, `trivia`, `msmarco` and `nq_open`.
+- **Context-grounded QA:** train on `hotpot_context`; evaluate on `hotpot_context`,
+  `musique` and `2wiki_comp`.
 
-Training and evaluation read the same YAML files, in this order: `configs/default.yaml`,
-`configs/judge.yaml`, `configs/models/<model>.yaml`, `configs/methods/<method>.yaml` and
-`configs/datasets/<dataset>.yaml`. Each file overrides the ones before it, and
-`--set key=value` on the command line overrides all of them. `$JUDGE` is a set of such
-overrides.
+Datasets download from the HuggingFace Hub on first use and are cached under `HF_HOME`.
+
+Each run merges `configs/default.yaml`, `configs/judge.yaml`, `configs/models/<model>.yaml`,
+`configs/methods/<method>.yaml` and `configs/datasets/<dataset>.yaml`, in that order, with
+later files taking precedence. `--set key=value` overrides all of them.
 
 ## 4. Training
 
-Every trainer takes `--model`, `--dataset`, `--exp-name` and `--set`. Checkpoints go to
-`ckpt/<METHOD>/<exp-name>/` and training logs to `results/<exp-name>/`. Give each run its
-own `--exp-name`. Without it, all runs of one method and model write to the same
-checkpoint directory.
-
-Every trainer also scores the policy on the validation split every 0.1 epoch: every 250
-steps for CSR, RLVR and RLCR, and every 125 steps for RD. The last step is skipped,
-because the final checkpoint is scored in Section 5. To change the interval, or to turn
-validation off with 0 or any value larger than the run, set
-`--set method.train.eval_every_steps=<N>`.
-
-**CSR** uses the correctness reward plus the semantic calibration reward. The
-calibration weight follows a sigmoid schedule from 0.8 to 1.2. This schedule is the
-default in `configs/methods/csr.yaml`, so the command needs no extra flag:
+Each trainer takes `--model`, `--dataset`, `--exp-name` and `--set`. Checkpoints are
+written to `ckpt/<METHOD>/<exp-name>/` and logs to `results/<exp-name>/`. Give every run
+its own `--exp-name`; otherwise runs of the same method and model share a checkpoint
+directory.
 
 ```bash
-python train/train_CSR.py --model qwen --dataset hotpot --exp-name CSR_qwen_hotpot $JUDGE
-```
+# CSR: correctness + semantic calibration reward (weight ramped 0.8 -> 1.2 on a sigmoid)
+python train/train_CSR.py  --model qwen --dataset hotpot --exp-name CSR_qwen_hotpot  $JUDGE
 
-**RLVR** uses the correctness reward only. All other settings are the same as CSR:
-
-```bash
+# RLVR: correctness reward only, otherwise identical to CSR
 python train/train_RLVR.py --model qwen --dataset hotpot --exp-name RLVR_qwen_hotpot $JUDGE
-```
 
-**RLCR** follows the published RLCR recipe, ported to Unsloth. As in that recipe, it
-always trains on HotpotQA prompts that include the supporting paragraphs, whether
-`--dataset` is `hotpot` or `hotpot_context`:
-
-```bash
+# RLCR: the published recipe, ported to Unsloth
 python train/train_RLCR.py --model qwen --dataset hotpot --exp-name RLCR_qwen_hotpot $JUDGE
-```
 
-**RD** follows the upstream Rewarding Doubt release and runs in `csr-rd`. The defaults in
-`configs/methods/rd.yaml` are the settings the paper's RD results use. For `qwen32b`,
-also add `--set method.train.ppo_mini_batch_size=2 --set method.train.ppo_gradient_accumulation_steps=2`
-to fit in memory.
-
-```bash
+# RD: the Rewarding Doubt baseline, in the csr-rd environment
 conda activate csr-rd
-python train/train_RD.py --model qwen --dataset hotpot --exp-name RD_qwen_hotpot
+python train/train_RD.py   --model qwen --dataset hotpot --exp-name RD_qwen_hotpot
 conda activate csr
 ```
 
+The defaults in `configs/methods/` reproduce the paper. A few notes:
+
+- RLCR always trains on HotpotQA prompts with supporting paragraphs, as in its original
+  recipe, whether `--dataset` is `hotpot` or `hotpot_context`.
+- For `qwen14b`, the paper ramps the CSR weight from 0.5 to 0.7:
+  `--set method.train.cali_w_start=0.5 --set method.train.cali_w_end=0.7`.
+- For RD on `qwen32b`, add `--set method.train.ppo_mini_batch_size=2
+  --set method.train.ppo_gradient_accumulation_steps=2` to fit in memory.
+- Every 0.1 epoch (250 steps; 125 for RD), the trainers score the policy on the
+  evaluation split. Set `--set method.train.eval_every_steps=0` to turn this off.
+
 ## 5. Evaluation
 
-Each evaluation writes `results/<exp-name>/{config.yaml,results.json,results.csv}`. Do
-not reuse a training `--exp-name` here, because that directory already holds the training
-logs. Without `--exp-name`, the name is `<METHOD>_<model>_<dataset>_<checkpoint>`, for example
-`CSR_qwen_trivia_checkpoint-2500`, and `Base` runs end in `base`. If the directory
-already exists, the run resumes from the saved records. Add `--fresh` to start over.
+Each evaluation writes `results/<exp-name>/{config.yaml,results.json,results.csv}`. The
+default name is `<METHOD>_<model>_<dataset>_<checkpoint>`, e.g.
+`CSR_qwen_trivia_checkpoint-2500`. Use a name different from the training run, whose
+directory already holds its logs. An interrupted run resumes from its saved records;
+`--fresh` starts over.
 
-### 5.1 Base, CSR and RLVR
-
-`evaluation/eval_semantic.py` samples $K = 16$ rollouts per question and computes the
-confidence $c(x)$ from them. Training uses $K = 8$. `Base` is the untrained model and takes no `--ckpt`:
+**Base, RLVR and CSR** sample $K = 16$ rollouts per question (training uses $K = 8$) and
+compute $c(x)$ from them. `Base` takes no `--ckpt`.
 
 ```bash
 for ds in hotpot trivia msmarco nq_open; do
   python evaluation/eval_semantic.py --method Base --model qwen --dataset $ds $JUDGE
-  python evaluation/eval_semantic.py --method CSR --model qwen --dataset $ds $JUDGE \
+  python evaluation/eval_semantic.py --method CSR  --model qwen --dataset $ds $JUDGE \
     --ckpt ckpt/CSR/CSR_qwen_hotpot/checkpoint-2500
   python evaluation/eval_semantic.py --method RLVR --model qwen --dataset $ds $JUDGE \
     --ckpt ckpt/RLVR/RLVR_qwen_hotpot/checkpoint-2500
 done
 ```
 
-### 5.2 RLCR and RD
-
-`evaluation/eval_verbalized.py` parses the confidence the model states:
+**RLCR and RD** answer once with greedy decoding and state a confidence, which is parsed
+from the output.
 
 ```bash
 for ds in hotpot trivia msmarco nq_open; do
   python evaluation/eval_verbalized.py --method RLCR --model qwen --dataset $ds $JUDGE \
     --ckpt ckpt/RLCR/RLCR_qwen_hotpot/checkpoint-2500
-  python evaluation/eval_verbalized.py --method RD --model qwen --dataset $ds $JUDGE \
+  python evaluation/eval_verbalized.py --method RD   --model qwen --dataset $ds $JUDGE \
     --ckpt ckpt/RD/RD_qwen_hotpot/model_finetuned_step_1250
 done
 ```
 
-### 5.3 Analysis
+## 6. Analysis
 
-These scripts re-score finished evaluations without a GPU and produce the appendix
-tables:
+These scripts re-score finished evaluations for the appendix. They need no GPU and no
+judge.
 
 | Script | Reports |
 | --- | --- |
 | `analysis/estimators.py` | Semantic Density and SIMBA-UQ's Bayesian aggregation |
-| `analysis/aggregation.py` | SIMBA-UQ's arithmetic aggregation and the `clf-pairs+gen` classifier |
-| `analysis/selective.py` | Selective prediction (AURAC, AUGRC) |
+| `analysis/aggregation.py` | SIMBA-UQ's arithmetic aggregation and the `clf-pairs+gen` classifier (one backbone per call, `--model qwen7b` etc.) |
+| `analysis/selective.py` | Selective prediction (AURAC, AUGRC) and confidence parse rates (`--table selective\|parse\|all`) |
+| `scripts/f1_judge_eval.py` | Token-F1 re-clustering of saved CSR-F1 rollouts |
 
-Semantic Density and `clf-pairs+gen` also use the mean token log-probability of each
-rollout, which `analysis/logprobs_hf.py` computes once per run on a GPU:
+Semantic Density and `clf-pairs+gen` also need the mean token log-probability of each
+rollout. `analysis/logprobs_hf.py` computes it once per run, on a GPU:
 
 ```bash
 python analysis/logprobs_hf.py --model qwen --method CSR \
   --ckpt ckpt/CSR/CSR_qwen_hotpot/checkpoint-2500 --datasets hotpot trivia msmarco nq_open
 ```
 
-The analysis scripts and `scripts/f1_judge_eval.py` look up runs by the names the paper
-used. These names are set in `analysis/runs.py`, `analysis/logprobs_hf.py` and
-`scripts/f1_judge_eval.py`. Change them to your run names before running the scripts.
+The scripts find runs through name templates such as `CSR_{model}_{dataset}_z10_step2500_nano_k16`,
+where `{model}` is a backbone tag (`llama8b`, `qwen7b`, `mistral7b`). The templates are
+defined in `analysis/runs.py`, `analysis/logprobs_hf.py` and `scripts/f1_judge_eval.py`;
+edit them to match your `--exp-name`s.
 
-The run names use backbone tags (`llama8b`, `qwen7b`, `mistral7b`) in place of the
-`--model` keys, so `analysis/aggregation.py` also takes `--model qwen7b`,
-`llama8b` or `mistral7b`. It scores one backbone per call.
-
----
-
-# Citation
-
-If you find this code helpful in your research, please consider citing:
+## Citation
 
 ```bibtex
 @inproceedings{csr2026calibrating,
@@ -247,11 +208,10 @@ year={2026}
 }
 ```
 
-# Implementation Credits
+## Acknowledgements
 
-Some of our implementations build on other repositories. We thank the authors of
-[RLCR](https://github.com/damanimehul/RLCR),
+This code builds on [RLCR](https://github.com/damanimehul/RLCR),
 [Rewarding Doubt](https://github.com/pasta99/RewardingDoubt),
-[Unsloth](https://github.com/unslothai/unsloth),
-[TRL](https://github.com/huggingface/trl) and
-[vLLM](https://github.com/vllm-project/vllm) for making their code publicly available.
+[Unsloth](https://github.com/unslothai/unsloth), [TRL](https://github.com/huggingface/trl)
+and [vLLM](https://github.com/vllm-project/vllm). We thank their authors for releasing
+their code.
