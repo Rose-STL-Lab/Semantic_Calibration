@@ -26,7 +26,7 @@ estimators reported in the appendix.
 | Path | What it is |
 | --- | --- |
 | `csr/` | The library: rewards, semantic clustering, judge client, config loader, metrics |
-| `train/` | One trainer per method — `train_CSR.py`, `train_RLVR.py`, `train_RLCR.py`, `train_RD.py` |
+| `train/` | One trainer per method: `train_CSR.py`, `train_RLVR.py`, `train_RLCR.py`, `train_RD.py` |
 | `evaluation/` | `eval_semantic.py` (sampling-based) and `eval_verbalized.py` (verbalized-confidence baselines) |
 | `configs/` | YAML defaults, split into `methods/`, `models/`, `datasets/`, plus `judge.yaml` |
 | `analysis/` | Post-hoc estimators and aggregation rules reported in the appendix |
@@ -64,48 +64,38 @@ pip install -r requirements-rd.txt
 
 ## 2. Setup the Judge
 
-CSR's reward and every sampling-based evaluation ask an LLM judge two kinds of
-question: *is this answer correct against the gold answer*, and *are these two answers
-semantically equivalent*. **A judge has to be reachable before any run starts.**
+CSR's reward and every sampling-based evaluation call an LLM judge for two questions:
+whether an answer matches the gold answer, and whether two answers mean the same thing.
+A judge must be reachable before any run starts.
 
-The default is GPT-4.1-nano on the hosted OpenAI endpoint, so all it needs is a key:
+The default judge is GPT-4.1-nano on the OpenAI API. It only needs a key:
 
 ```bash
 export OPENAI_API_KEY=sk-...
 ```
 
-To run a local judge instead — gpt-oss-20b, or any other model vLLM can serve — start a
-server and point the config at it:
+To use a local judge such as gpt-oss-20b, serve it with vLLM:
 
 ```bash
-export OPENAI_API_KEY=EMPTY     # a local server ignores it, the trainer still requires it
-bash scripts/serve/serve_judge.sh 0 8310 openai/gpt-oss-20b
-#                                 │   │    └ model
-#                                 │   └ port
-#                                 └ GPU
+export OPENAI_API_KEY=EMPTY     # ignored by a local server, but the code requires it
+bash scripts/serve/serve_judge.sh 0 8310 openai/gpt-oss-20b   # GPU, port, model
 ```
 
-then append to any command:
+Then add these overrides to any training or evaluation command:
 
 ```bash
 --set judge.base_url=http://127.0.0.1:8310/v1 --set judge.model_id=gpt-oss-20b \
 --set judge.reasoning_effort=low --set judge.max_tokens=1024
 ```
 
-`reasoning_effort` and the larger `max_tokens` are what gpt-oss-20b needs to reason
-before answering; a non-reasoning model rejects the first and does not need the second.
-
-Token F1 can stand in for the rollout-vs-rollout equivalence call
-(`--set judge.equivalence=f1`), which cuts the judge's cost by the 88% of calls that are
-pairwise; correctness still goes to the model. That is the CSR-F1 configuration the paper
-reports, with `judge.f1_threshold` 0.50 for Llama and Mistral and 0.80 for Qwen.
+gpt-oss-20b needs `reasoning_effort` and the larger `max_tokens`. Drop both for a
+non-reasoning model.
 
 ## 3. Prepare Datasets
 
-Datasets are pulled from the HuggingFace Hub on first use; no manual download is
-needed. They land in the HuggingFace cache (`HF_HOME`, `~/.cache/huggingface` by
-default). Checkpoints and evaluation records are written inside the repository, and
-neither directory is tracked:
+Datasets download from the HuggingFace Hub on first use and are cached under `HF_HOME`
+(default `~/.cache/huggingface`). Checkpoints and evaluation results are written inside
+the repository:
 
 ```
 .
@@ -121,24 +111,36 @@ neither directory is tracked:
 
 ## 4. Train
 
-One entry point per method; the environment is yours to set.
+Each method has its own entry point with the same arguments:
 
 ```bash
 export CUDA_VISIBLE_DEVICES=0
-export OPENAI_API_KEY=EMPTY           # a local vLLM judge ignores it, the trainer requires it
-export HF_HOME=/path/to/hf/cache      # optional; otherwise ~/.cache/huggingface
+export OPENAI_API_KEY=EMPTY
 
 python train/train_CSR.py --model qwen --dataset hotpot [--set key=value ...]
 ```
 
-`train_RLVR.py`, `train_RLCR.py` and `train_RD.py` take the same arguments. RD pins the
-older stack, so activate the environment built from `requirements-rd.txt` for it and the
-unsloth one for the other three.
+`train_RLVR.py` and `train_RLCR.py` run in the main environment. `train_RD.py` runs in
+the environment built from `requirements-rd.txt`.
 
-The RD defaults in `configs/methods/rd.yaml` follow the upstream Rewarding-Doubt
-release, with two departures: LoRA rank 32 instead of 8, and an F1@0.5 correctness
-reward instead of exact match on the free-form datasets. The RD rows in the paper also
-turn on these flags:
+### 4.1 CSR
+
+The calibration weight ramps from 0.8 to 1.2 on a sigmoid by default, and the
+correctness weight `corr_w` is 1.0. To keep the calibration weight constant:
+
+```bash
+python train/train_CSR.py --model qwen --dataset hotpot \
+  --set method.train.cali_w_start=1.0 --set method.train.cali_w_end=1.0
+```
+
+`cali_w_schedule` can also be `linear`. `configs/methods/csr.yaml` notes the weights at
+which training becomes unstable.
+
+### 4.2 RD
+
+`configs/methods/rd.yaml` follows the upstream Rewarding-Doubt release, except for LoRA
+rank 32 (upstream uses 8) and an F1@0.5 correctness reward (upstream uses exact match).
+The RD rows in the paper use:
 
 ```bash
 python train/train_RD.py --model qwen --dataset hotpot \
@@ -147,49 +149,28 @@ python train/train_RD.py --model qwen --dataset hotpot \
   --set method.train.ppo_temperature=1.0 --set method.train.ppo_repetition_penalty=1.0
 ```
 
-Two memory settings keep the same update at lower activation memory
-(`ppo_mini_batch_size` x `ppo_gradient_accumulation_steps` samples per optimizer step):
-the 32B run uses `2` x `2` and `hotpot_context` uses `1` x `4` together with
-`method.train.unpadded_generation=true`, which generates one prompt at a time (unsloth's
-batched inference is unreliable on prompts of one to two thousand tokens). The Qwen3
-backbones (`qwen14b`, `qwen32b`) need `transformers>=4.51.3` and `unsloth>=2025.4.7` in
-the RD environment in place of the versions pinned in `requirements-rd.txt`.
-
-The two settings that matter most for CSR are the calibration weight and the weight on
-binary correctness:
-
-* **`cali_w_start` / `cali_w_end`** — equal values give a constant weight; different
-  values are interpolated by `cali_w_schedule` (`linear` or `sigmoid`, min-max rescaled
-  so it hits both endpoints exactly).
-* **`corr_w`** — 1.0 throughout the paper.
-
-The defaults ramp 0.8 → 1.2 on a sigmoid; to hold the weight constant instead:
-
-```bash
-python train/train_CSR.py --model qwen --dataset hotpot \
-  --set method.train.cali_w_start=1.0 \
-  --set method.train.cali_w_end=1.0
-```
-
-Higher is not better: `configs/methods/csr.yaml` records where the policy fragments and
-where it collapses onto a single answer.
+To save memory, the 32B run sets `method.train.ppo_mini_batch_size=2` and
+`method.train.ppo_gradient_accumulation_steps=2`. `hotpot_context` sets them to 1 and 4
+and adds `method.train.unpadded_generation=true`. The Qwen3 models (`qwen14b`, `qwen32b`) need
+`transformers>=4.51.3` and `unsloth>=2025.4.7` in the RD environment.
 
 ## 5. Evaluate
 
-Two entry points, picked by method: `evaluation/eval_semantic.py` reads confidence off
-the rollout spread for **Base, RLVR and CSR**, and `evaluation/eval_verbalized.py` parses
-the confidence token for **RD and RLCR**.
+Each run writes `results/<run>/{config.yaml,results.json,results.csv}`. Use
+`--exp-name` to give each run its own directory.
+
+### 5.1 Base, RLVR and CSR
+
+`evaluation/eval_semantic.py` samples 16 answers per question and reads confidence from
+their semantic agreement:
 
 ```bash
-export CUDA_VISIBLE_DEVICES=0
-export OPENAI_API_KEY=...
-
 python evaluation/eval_semantic.py --method Base --model qwen --dataset hotpot
 python evaluation/eval_semantic.py --method CSR --model qwen --dataset hotpot \
   --ckpt ckpt/CSR/<run>/checkpoint-2500
 ```
 
-Loop over the four datasets in your own shell to fill a table row:
+For a full table row, loop over the four datasets:
 
 ```bash
 for ds in hotpot trivia msmarco nq_open; do
@@ -197,19 +178,31 @@ for ds in hotpot trivia msmarco nq_open; do
 done
 ```
 
-Each run writes `results/<run>/{config.yaml,results.json,results.csv}`. Pass `--exp-name`
-to keep two variants of the same checkpoint from sharing a directory.
+### 5.2 RD and RLCR
 
-**Confidence from token F1 instead of the judge.** Re-clusters finished runs with token
-overlap in place of the pairwise equivalence calls, at the thresholds the paper reports
-(0.50 Llama/Mistral, 0.80 Qwen), writing each result to a separate `*_semf1_k16` run:
+`evaluation/eval_verbalized.py` parses the confidence the model states:
 
 ```bash
-python scripts/f1_judge_eval.py              # the thresholds the paper reports
+python evaluation/eval_verbalized.py --method RD --model qwen --dataset hotpot \
+  --ckpt ckpt/RD/<run>/model_finetuned_step_1250
+python evaluation/eval_verbalized.py --method RLCR --model qwen --dataset hotpot \
+  --ckpt ckpt/RLCR/<run>/checkpoint-2500
 ```
 
-**Post-hoc estimators on a finished run.** These re-score `results/` and need no GPU;
-no estimator here is ever used during training:
+### 5.3 Token F1 in place of the judge
+
+Setting `--set judge.equivalence=f1` replaces the pairwise equivalence calls with token
+F1. Correctness is still judged by the LLM. `scripts/f1_judge_eval.py` re-clusters
+finished CSR runs this way at the paper's thresholds (0.50 for Llama and Mistral, 0.80
+for Qwen) and writes each result to a separate `*_semf1_k16` run:
+
+```bash
+python scripts/f1_judge_eval.py
+```
+
+### 5.4 Post-hoc estimators
+
+These scripts re-score finished runs in `results/` without a GPU:
 
 | Script | Reports |
 | --- | --- |
@@ -217,46 +210,22 @@ no estimator here is ever used during training:
 | `analysis/aggregation.py` | SIMBA-UQ's arithmetic aggregation and the `clf-pairs+gen` classifier |
 | `analysis/selective.py` | Selective prediction (AURAC, AUGRC) |
 
-Semantic Density and the `clf-pairs+gen` classifier read one extra per-rollout feature,
-the mean token log-probability. `analysis/logprobs_hf.py` writes it once per run and is the only script
-here that loads the backbone, so it is the one that needs a GPU:
+Semantic Density and `clf-pairs+gen` also use the mean token log-probability of each
+answer. Compute it once per run on a GPU:
 
 ```bash
 python analysis/logprobs_hf.py --model qwen --method CSR --datasets hotpot trivia
 ```
 
-Without that file SemDens falls back to uniform weights and `clf-pairs+gen` scores
-similarities only, which `--no-logprobs` also forces for a like-for-like comparison
-across backbones.
-
-Each file's docstring states what it reproduces and where it departs from the method it
-is named after. They locate runs by name; `analysis/runs.py` holds the naming scheme
-they expect, so point that module at your own runs first.
+Without it, Semantic Density uses uniform weights and `clf-pairs+gen` uses similarities
+only. `analysis/aggregation.py --no-logprobs` forces the latter. The scripts find runs by
+name, so edit `analysis/runs.py` to match your run names first.
 
 ## 6. Configuration
 
-Config is layered, each file overriding the one before: `default.yaml`, `judge.yaml`,
-the model, the method, then the dataset. The dataset comes last so it can state its own
-requirements. Anything on the command line wins over all of them.
-
-Three things worth knowing before changing anything:
-
-* **Rollout budget.** `num_generations` controls training; `method.eval.num_rollouts`
-  controls evaluation. The paper trains at K=8 and evaluates at K=16.
-* **Judge calls.** Clustering asks one symmetric equivalence question per unordered
-  pair, so K(K−1)/2 calls per question. At K=16 that is 120 calls, which dominates
-  evaluation time.
-* **Rollouts per optimizer step.** TRL counts completions, not prompts:
-  `per_device_train_batch_size * gradient_accumulation_steps` is the completion
-  budget, so prompts per step is that over `num_generations` — `8 * 4 / 8` = 4 at
-  the defaults, hence 2500 steps for one epoch over 10k prompts.
-
-The shipped defaults are `beta` 0.01, a sigmoid calibration weight from `cali_w`
-0.8 to 1.2, training K=8 and evaluation K=16. Earlier preprint versions reported
-`beta` 0.1 and a raw, un-normalized BCE with a 0.1 → 0.2 weight range; the reward
-here is the affine-normalized form (`csr/rewards.py`, scale `DELTA_CE` = 13.8155),
-under which a raw weight `w` corresponds to `w * 13.8155`, so that 0.1 → 0.2 range
-is 1.3816 → 2.7631 in these units.
+Configs load in this order, each overriding the previous one: `default.yaml`,
+`judge.yaml`, the model, the method, the dataset. `--set key=value` on the command line
+overrides all of them.
 
 ---
 
