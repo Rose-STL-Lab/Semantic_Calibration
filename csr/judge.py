@@ -103,9 +103,8 @@ class Judge:
             if value:
                 return value
         raise KeyError(
-            "no judge API key: export OPENAI_API_KEY (or OPENAI_API_KEY_4O). "
-            "A local vLLM judge ignores the value but still needs it set, so "
-            "`export OPENAI_API_KEY=EMPTY` is enough there.")
+            "no judge API key: export OPENAI_API_KEY (or OPENAI_API_KEY_4O), or "
+            "point judge.base_url at a local server, which needs no key.")
 
     @property
     def client(self):
