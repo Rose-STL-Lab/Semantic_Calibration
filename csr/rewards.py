@@ -98,6 +98,15 @@ class RewardComputer:
                 digest.update(b"\x00")
         return digest.digest()
 
+    def _questions(self, prompts, question) -> list[str]:
+        questions = row_questions(prompts, question)
+        if not getattr(self, "_logged_question", False):
+            # one line at the start of training, to confirm what the judge is shown
+            source = "dataset column" if question is not None else "prompt user turn"
+            print(f"[reward] judge question from {source}: {questions[0][:200]!r}", flush=True)
+            self._logged_question = True
+        return questions
+
     def _judge_group(self, answers, gold, question) -> list[int]:
         return self.judge.score_against_gold(answers, gold, question, self.kind)
 
@@ -109,7 +118,7 @@ class RewardComputer:
             raise ValueError(f"expected one prompt per completion, got n={n}, batch={batch}")
 
         texts = [strip_prompt_prefix(c, self.markers) for c in completions]
-        questions = row_questions(prompts, question)
+        questions = self._questions(prompts, question)
         rewards = torch.zeros(n, dtype=torch.float32)
         verdicts = [0] * n
 
@@ -199,7 +208,7 @@ class RewardComputer:
             return [self.corr_w if int(y) == 1 else 0.0 for y in cached]
 
         answers = [normalize_for_equiv(c, self.markers) for c in completions]
-        questions = row_questions(prompts, question)
+        questions = self._questions(prompts, question)
         # the alias list must stay intact: normalize_for_equiv keeps only the first
         # alias, so "Mumbai" would miss gold ["Bombay", "Mumbai"]
         golds = [gold_for_row(answer, i, batch, n) for i in range(n)]

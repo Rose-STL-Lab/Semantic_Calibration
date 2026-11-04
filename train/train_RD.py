@@ -808,33 +808,38 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
                     ckpt_dir=step_ckpt_dir,
                 )
 
-            if eval_every_steps > 0 and (global_step % eval_every_steps == 0):
+            # the final checkpoint is scored by the formal evaluation, not here
+            if (eval_every_steps > 0 and global_step % eval_every_steps == 0
+                    and global_step < len(ppo_trainer.dataloader) * epochs):
                 if is_unsloth:
                     FastLanguageModel.for_inference(model.pretrained_model)
                 else:
                     model.eval()
-                train_eval_metrics = evaluate_subset(
-                    model,
-                    dataloader_train_eval,
-                    tokenizer,
-                    generation_kwargs_eval,
-                    device,
-                    "train",
-                    reward_metric,
-                    reward_threshold,
-                    strict=strict_format,
-                )
-                val_metrics = evaluate_subset(
-                    model,
-                    dataloader_validation,
-                    tokenizer,
-                    generation_kwargs_eval,
-                    device,
-                    "validation",
-                    reward_metric,
-                    reward_threshold,
-                    strict=strict_format,
-                )
+                # validation samples with torch's global RNG; fork it so the training run
+                # (PPO sampling, data order) does not depend on how often it validates
+                with torch.random.fork_rng(devices=list(range(torch.cuda.device_count()))):
+                    train_eval_metrics = evaluate_subset(
+                        model,
+                        dataloader_train_eval,
+                        tokenizer,
+                        generation_kwargs_eval,
+                        device,
+                        "train",
+                        reward_metric,
+                        reward_threshold,
+                        strict=strict_format,
+                    )
+                    val_metrics = evaluate_subset(
+                        model,
+                        dataloader_validation,
+                        tokenizer,
+                        generation_kwargs_eval,
+                        device,
+                        "validation",
+                        reward_metric,
+                        reward_threshold,
+                        strict=strict_format,
+                    )
                 append_eval_metrics(
                     csv_path,
                     [
@@ -873,14 +878,18 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
                     ppo_trainer.save_pretrained(os.path.join(out_dir, "model_finetuned_best"))
                     best_reward = mean_reward
                     best_reward_step = global_step
-                    save_training_state(
-                        ppo_trainer=ppo_trainer,
-                        out_dir=out_dir,
-                        global_step=global_step,
-                        epoch_idx=epoch,
-                        best_reward=best_reward,
-                        best_reward_step=best_reward_step,
-                    )
+                    # refresh the state this step already saved, so its best_reward is
+                    # current; a step without an adapter must not become the resume point
+                    if save_every_steps > 0 and global_step % save_every_steps == 0:
+                        save_training_state(
+                            ppo_trainer=ppo_trainer,
+                            out_dir=out_dir,
+                            global_step=global_step,
+                            epoch_idx=epoch,
+                            best_reward=best_reward,
+                            best_reward_step=best_reward_step,
+                            ckpt_dir=os.path.join(out_dir, f"model_finetuned_step_{global_step}"),
+                        )
 
         avg_reward = float(np.mean(rewards_epoch))
         print(f"Finished epoch {epoch + 1}. Average train reward: {avg_reward}")

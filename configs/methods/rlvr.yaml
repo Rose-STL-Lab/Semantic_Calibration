@@ -34,7 +34,7 @@ method:
     # when the rows are only being read for their trend; checkpoints are saved
     # every save_steps either way and can be scored afterwards with
     # evaluation/eval_semantic.py.
-    eval_every_steps: 1000
+    eval_every_steps: 250          # 0.1 epoch (2500 steps); 0, or more steps than the run, turns it off
     eval_num_rollouts: 16
     eval_max_new_tokens: 256
     eval_temperature: 0.7

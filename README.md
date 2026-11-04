@@ -130,6 +130,12 @@ Every trainer takes `--model`, `--dataset`, `--exp-name` and `--set`. Checkpoint
 own `--exp-name`. Without it, all runs of one method and model write to the same
 checkpoint directory.
 
+Every trainer also scores the policy on the validation split every 0.1 epoch: every 250
+steps for CSR, RLVR and RLCR, and every 125 steps for RD. The last step is skipped,
+because the final checkpoint is scored in Section 5. To change the interval, or to turn
+validation off with 0 or any value larger than the run, set
+`--set method.train.eval_every_steps=<N>`.
+
 **CSR** uses the correctness reward plus the semantic calibration reward. The
 calibration weight follows a sigmoid schedule from 0.8 to 1.2. This schedule is the
 default in `configs/methods/csr.yaml`, so the command needs no extra flag:

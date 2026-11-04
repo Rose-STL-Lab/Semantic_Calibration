@@ -6,6 +6,7 @@ import csv
 import json
 import numbers
 import os
+import shutil
 import time
 
 from transformers import TrainerCallback
@@ -94,8 +95,8 @@ class JudgeCacheCallback(TrainerCallback):
 
 
 class PeriodicEvalCallback(TrainerCallback):
-    # scores the policy on the validation split every N steps; that step's checkpoint
-    # if it exists, else a throwaway adapter. Failures are logged, training continues.
+    # scores the policy on the validation split every N steps, skipping the last step.
+    # Failures are logged, training continues.
 
     def __init__(self, cfg, dataset, tokenizer, judge, run_dir: str,
                  correctness_prompt_kind: str = "judge", every_steps: int = 250):
@@ -112,17 +113,12 @@ class PeriodicEvalCallback(TrainerCallback):
         self._writer = None
         print(f"[validation] {self.csv_path}")
 
-    def _adapter_for(self, args, model, step: int) -> str:
-        checkpoint = os.path.join(args.output_dir, f"checkpoint-{step}")
-        if os.path.isdir(checkpoint):
-            return checkpoint
-        scratch = os.path.join(self.run_dir, f"_eval_adapter_step_{step}")
-        model.save_pretrained(scratch)
-        return scratch
-
     def on_step_end(self, args, state, control, model=None, **kwargs):
         step = int(state.global_step)
         if self.every_steps <= 0 or step <= 0 or step % self.every_steps:
+            return
+        # the final checkpoint is scored by the formal evaluation, not here
+        if state.max_steps and step >= int(state.max_steps):
             return
         if model is None:
             return
@@ -133,11 +129,22 @@ class PeriodicEvalCallback(TrainerCallback):
             print(f"[validation] step {step} skipped: {type(exc).__name__}: {exc}")
 
     def _evaluate(self, args, state, model, step: int) -> None:
-        adapter = self._adapter_for(args, model, step)
-        lora_request = model.load_lora(adapter) if hasattr(model, "load_lora") else None
-        started = time.time()
-        confidences, accuracies, records = self._collect(model, lora_request)
-        self._report(state, step, adapter, started, confidences, accuracies, records)
+        # always the live weights: on_step_end runs before the Trainer saves this
+        # step, so an existing checkpoint-<step> would be left over from an earlier run
+        adapter = os.path.join(self.run_dir, f"_eval_adapter_step_{step}")
+        try:
+            model.save_pretrained(adapter)
+            lora_request = model.load_lora(adapter) if hasattr(model, "load_lora") else None
+            started = time.time()
+            confidences, accuracies, records = self._collect(model, lora_request)
+        finally:
+            # a full adapter copy per pass (1.1 GB at 32B); the step's checkpoint, if
+            # save_steps lands on it, is written by the Trainer right after this
+            shutil.rmtree(adapter, ignore_errors=True)
+        saved = os.path.join(args.output_dir, f"checkpoint-{step}")
+        on_save_step = bool(args.save_steps) and step % int(args.save_steps) == 0
+        self._report(state, step, saved if on_save_step else "", started,
+                     confidences, accuracies, records)
 
     def _n(self) -> int:
         return len(self.dataset)
