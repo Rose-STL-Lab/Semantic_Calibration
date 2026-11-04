@@ -2,11 +2,7 @@ __pycache__/
 *.py[cod]
 *.log
 
-# Run outputs: datasets are downloaded on first use; checkpoints and evaluation
-# records are large and machine-specific.
-data/*
-!data/.gitkeep
-!data/README.md
+# Run outputs: checkpoints and evaluation records are large and machine-specific.
 ckpt/*
 !ckpt/.gitkeep
 results/*
@@ -16,7 +12,6 @@ runs/
 
 # Caches the trainers write into the working directory.
 unsloth_compiled_cache/
-.rd_unsloth_cwd*/
 grpo_trainer_lora_model_*/
 
 # Credentials and editor files.

@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 import string
 import unicodedata
-from typing import Iterable, Sequence
+from typing import Sequence
 
 _CANON_PREFIX_RE = re.compile(
     r"^\s*(answer\s*:\s*|final\s*answer\s*:\s*|the\s*answer\s*is\s*|answer\s*is\s*)",

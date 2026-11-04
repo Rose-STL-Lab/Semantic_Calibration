@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import time
 from typing import Iterable
 
@@ -234,18 +235,19 @@ def resolve_checkpoints(path: str | None) -> list[str | None]:
                                     or name.startswith("model_finetuned")):
             children.append(full)
     if not children:
-        # a merged / non-PEFT checkpoint directory is itself the checkpoint
+        if not os.path.exists(os.path.join(clean, "adapter_config.json")):
+            raise FileNotFoundError(f"{clean} holds no checkpoint-*/model_finetuned* "
+                                    "directories and is not a LoRA adapter")
         return [clean]
 
-    def step_of(p):
-        digits = "".join(ch for ch in os.path.basename(p) if ch.isdigit())
-        return int(digits) if digits else -1
-
-    return sorted(children, key=step_of)
+    # RD's model_finetuned and model_finetuned_best copy a stepped checkpoint;
+    # pass one of them directly to evaluate it
+    stepped = [c for c in children if checkpoint_step(c) >= 0]
+    return sorted(stepped or children, key=checkpoint_step)
 
 
 def checkpoint_step(path: str | None) -> int:
     if not path:
         return 0
-    digits = "".join(ch for ch in os.path.basename(str(path).rstrip("/")) if ch.isdigit())
-    return int(digits) if digits else -1
+    match = re.search(r"(\d+)$", os.path.basename(str(path).rstrip("/")))
+    return int(match.group(1)) if match else -1

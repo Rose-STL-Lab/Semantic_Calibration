@@ -1,11 +1,11 @@
 model:
   name: qwen32b
 
-  # checkpoints live in ckpt/<METHOD>/<ckpt_name>/
+  # backbone tag in run names (and ckpt/<METHOD>/<ckpt_name>/ without --exp-name)
   ckpt_name: qwen32b
 
-  # Same recipe as qwen14b.yaml. The plain bnb-4bit build: unsloth's vLLM path does
-  # not support the dynamic-quant 32B, so name it to keep train and eval aligned.
+  # Same recipe as qwen14b.yaml. The plain bnb-4bit build, since unsloth's vLLM path
+  # does not support the dynamic-quant 32B; use the same build for training and eval.
   hf_id: unsloth/Qwen3-32B-bnb-4bit
   use_exact_model_name: false
 

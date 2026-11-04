@@ -1,7 +1,7 @@
 model:
   name: mistral
 
-  # checkpoints live in ckpt/<METHOD>/<ckpt_name>/
+  # backbone tag in run names (and ckpt/<METHOD>/<ckpt_name>/ without --exp-name)
   ckpt_name: mistral7b
   hf_id: unsloth/mistral-7b-instruct-v0.3   # fp16 re-upload of mistralai/Mistral-7B-Instruct-v0.3
 

@@ -94,7 +94,7 @@ def _hotpot_context(example, system_prompt, user_template, method: str = "CSR"):
     if not context:
         return record
     if method == "RD":
-        # RD's own context phrasing (_normalize_squad_dataset_map_function)
+        # RD's context phrasing (rd_util/DataHelper.py, hotpotqa_context)
         record["prompt"] = _messages(
             system_prompt, f"Context: {context}, Question: {question}", user_template)
     else:
@@ -288,14 +288,6 @@ def load_split(cfg, split: str = "eval", size: int | None = None):
         print(f"[data] {name}: kept {len(dataset)}/{before} rows of types {sorted(keep)}")
 
     dataset = dataset.shuffle(seed=int(cfg.get("seed", 42)))
-
-    # single-split datasets: eval takes the head, train the tail, so they stay disjoint
-    if ds_cfg.get("single_split"):
-        head = int(ds_cfg["eval_size"])
-        if split == "train":
-            dataset = dataset.select(range(min(head, len(dataset)), len(dataset)))
-        else:
-            dataset = dataset.select(range(0, min(head, len(dataset))))
 
     if size is None:
         size = ds_cfg["train_size"] if split == "train" else ds_cfg["eval_size"]

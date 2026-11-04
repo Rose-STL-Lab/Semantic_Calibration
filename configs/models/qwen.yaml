@@ -1,7 +1,7 @@
 model:
   name: qwen
 
-  # checkpoints live in ckpt/<METHOD>/<ckpt_name>/
+  # backbone tag in run names (and ckpt/<METHOD>/<ckpt_name>/ without --exp-name)
   ckpt_name: qwen7b
   hf_id: unsloth/Qwen2.5-7B-Instruct   # fp16 re-upload of Qwen/Qwen2.5-7B-Instruct
 

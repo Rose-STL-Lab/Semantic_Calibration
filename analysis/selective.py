@@ -17,7 +17,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from analysis.runs import (  # noqa: E402
-    DATASETS, MODELS, MODEL_LABELS, RUN_TEMPLATES, SEMANTIC_METHODS, run_name,
+    DATASETS, MODELS, MODEL_LABELS, RUN_TEMPLATES, SEMANTIC_METHODS, missing_runs,
 )
 
 RESULTS = ROOT / "results"
@@ -65,9 +65,19 @@ def selective(conf: np.ndarray, acc: np.ndarray) -> tuple[float, float]:
     return aurac, augrc
 
 
+def _skip(model: str, templates: dict) -> bool:
+    missing = missing_runs(RESULTS, templates, model)
+    if missing:
+        print(f"[skip] {model}: {len(missing)} runs missing, e.g. {missing[0]}",
+              file=sys.stderr, flush=True)
+    return bool(missing)
+
+
 def selective_table(latex: bool) -> None:
     # accepted in decreasing order of the method's own confidence
     for model in MODELS:
+        if _skip(model, RUN_TEMPLATES):
+            continue
         rows = {}
         for method, pattern in RUN_TEMPLATES.items():
             cells = {}
@@ -104,8 +114,11 @@ def selective_table(latex: bool) -> None:
 
 
 def parse_rate_table(latex: bool) -> None:
-    # fraction whose verbalized confidence parsed and was in range
+    # fraction of records with both an answer and an in-range confidence parsed
+    verbalized = {m: t for m, t in RUN_TEMPLATES.items() if m not in SEMANTIC_METHODS}
     for model in MODELS:
+        if _skip(model, verbalized):
+            continue
         if latex:
             print(f"\\multirow{{5}}{{*}}{{{MODEL_LABELS[model]}}}")
         else:

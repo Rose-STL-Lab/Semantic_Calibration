@@ -27,10 +27,12 @@ RUN_TEMPLATES = {
 # confidence from semantic dispersion, not read off a verbalized scalar
 SEMANTIC_METHODS = {"Base", "RLVR", "CSR"}
 
-# SemDens and the SIMBA rules need per-rollout clusters, which only the sampling
-# methods record -- they iterate this, not RUN_TEMPLATES.
+# the sampling methods, whose runs store K rollouts per question; the post-hoc
+# estimators and aggregation rules iterate this, not RUN_TEMPLATES
 SEMANTIC_TEMPLATES = {m: t for m, t in RUN_TEMPLATES.items() if m in SEMANTIC_METHODS}
 
 
-def run_name(method: str, model: str, dataset: str) -> str:
-    return RUN_TEMPLATES[method].format(model=model, dataset=dataset)
+def missing_runs(results_dir, templates: dict, model: str) -> list[str]:
+    # run names among templates x DATASETS with no results.json under results_dir
+    names = [t.format(model=model, dataset=ds) for t in templates.values() for ds, _ in DATASETS]
+    return [n for n in names if not (results_dir / n / "results.json").exists()]

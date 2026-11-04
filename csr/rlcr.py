@@ -151,7 +151,8 @@ ANSWER_TAG_INSTRUCTION = (
 
 def _sample_removed_titles(example, rng: random.Random) -> Tuple[int, List[str]]:
     # RLCR's training and validation prompts drop paragraphs so some questions lack
-    # evidence; the formal evaluation (csr/data.py) keeps them all
+    # evidence; evaluation prompts come from csr/data.py (closed-book, or all
+    # paragraphs on the context datasets)
     supporting = list(example["supporting_facts"]["title"])
     all_titles = list(example["context"]["title"])
     # sorted: set order follows the per-process string hash, so the draw would not repeat

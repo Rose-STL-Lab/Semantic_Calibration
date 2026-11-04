@@ -1,6 +1,6 @@
 """Two SIMBA-UQ aggregation rules (arithmetic, clf-pairs+gen) over the stored rollouts.
 
-    python analysis/aggregation.py [--k 16] [--latex]
+    python analysis/aggregation.py [--model qwen7b] [--k 16] [--no-logprobs] [--latex]
 """
 
 from __future__ import annotations
@@ -17,13 +17,13 @@ from sklearn.model_selection import GroupKFold
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from analysis.runs import DATASETS, SEMANTIC_TEMPLATES  # noqa: E402
+from analysis.runs import DATASETS, SEMANTIC_TEMPLATES, missing_runs  # noqa: E402
 
 from csr.metrics import expected_calibration_error          # noqa: E402
 from analysis.estimators import jaccard, tokens, load_run  # noqa: E402
 
 RESULTS = ROOT / "results"
-MODEL = "qwen7b"                # default; override with --model (llama8b, mistral7b)
+MODEL = "qwen7b"
 SEED = 0
 N_FOLDS = 5
 ECE_BINS = 10
@@ -125,6 +125,9 @@ def score(exp: str, k: int) -> dict[str, tuple[float, float]]:
 
 
 def collect(k: int, model: str = MODEL) -> dict:
+    missing = missing_runs(RESULTS, SEMANTIC_TEMPLATES, model)
+    if missing:
+        raise SystemExit(f"{model}: {len(missing)} runs missing, e.g. {missing[0]}")
     table = {}
     for method, pattern in SEMANTIC_TEMPLATES.items():
         per_ds = {}

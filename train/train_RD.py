@@ -36,7 +36,6 @@ from unsloth import FastLanguageModel
 for _name, _obj in _trl_ppo_names.items():
     if vars(_trl_ppo).get(_name) is not _obj:
         setattr(_trl_ppo, _name, _obj)
-from typing import Tuple
 
 from rd_util.DataHelper import load_prepared_dataset
 from rd_util.ResponseHandling import response_to_QAResult

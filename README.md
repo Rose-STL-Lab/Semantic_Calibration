@@ -76,8 +76,8 @@ JUDGE="--set judge.base_url=http://127.0.0.1:8310/v1 --set judge.model_id=gpt-os
 ```
 
 `judge.model_id` is the last part of the model name. `reasoning_effort` and the larger
-`max_tokens` are for reasoning models; other models need only `base_url` and `model_id`. The commands below include `$JUDGE`; with the OpenAI API,
-leave it unset.
+`max_tokens` are for reasoning models; other models need only `base_url` and
+`model_id`. The commands below include `$JUDGE`; with the OpenAI API, leave it unset.
 
 **Token-F1 equivalence.** Adding `--set judge.equivalence=f1` to CSR training or
 `eval_semantic.py` compares rollouts by token F1 instead of the judge. Correctness is
@@ -190,15 +190,28 @@ rollout (without it they fall back to uniform weights and drop the `+gen` featur
 `analysis/logprobs_hf.py` computes it once per run, on a GPU:
 
 ```bash
-python analysis/logprobs_hf.py --model qwen --method CSR \
-  --ckpt ckpt/CSR/CSR_qwen_hotpot/checkpoint-2500 --datasets hotpot trivia msmarco nq_open
+DS="hotpot trivia msmarco nq_open"
+python analysis/logprobs_hf.py --model qwen --method Base --datasets $DS
+python analysis/logprobs_hf.py --model qwen --method RLVR --datasets $DS \
+  --ckpt ckpt/RLVR/RLVR_qwen_hotpot/checkpoint-2500
+python analysis/logprobs_hf.py --model qwen --method CSR  --datasets $DS \
+  --ckpt ckpt/CSR/CSR_qwen_hotpot/checkpoint-2500
 ```
 
-The scripts find runs through the name templates used in Section 5, such as
+For the token-F1 rows, train CSR with `--set judge.equivalence=f1`, evaluate it as in
+Section 5 with `--exp-name CSR_qwen7b_${ds}_f1eq080_step2500_nano_k16` (`f1eq050`
+for `llama8b` and `mistral7b`), then re-cluster those rollouts with token F1:
+
+```bash
+python scripts/f1_judge_eval.py --models qwen7b
+```
+
+The scripts find runs through the name templates used above, such as
 `CSR_{model}_{dataset}_z10_step2500_nano_k16`, where `{model}` is a backbone tag
 (`llama8b`, `qwen7b`, `mistral7b`). The templates are defined in `analysis/runs.py`,
 `analysis/logprobs_hf.py` and `scripts/f1_judge_eval.py`; edit them if you name runs
-differently.
+differently. A backbone with missing runs is skipped (`estimators.py`, `selective.py`)
+or reported (`aggregation.py`).
 
 ## Citation
 

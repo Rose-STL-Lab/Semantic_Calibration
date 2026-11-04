@@ -1,7 +1,7 @@
 model:
   name: qwen14b
 
-  # checkpoints live in ckpt/<METHOD>/<ckpt_name>/
+  # backbone tag in run names (and ckpt/<METHOD>/<ckpt_name>/ without --exp-name)
   ckpt_name: qwen14b
 
   # the RLVR/RD/RLCR adapters were trained on this pre-quantized 4-bit build

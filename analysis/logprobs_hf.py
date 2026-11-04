@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -119,7 +120,7 @@ def main() -> None:
     model = tokenizer = None
     for ds in args.datasets:
         cfg = load_config(args.method, args.model, ds, [])
-        name = cfg["model"]["ckpt_name"]          # results/ directory name
+        name = cfg["model"]["ckpt_name"]          # backbone tag in run names
         exp = EXP[args.method].format(m=name, d=ds)
         run_dir = RESULTS / exp
         results_path = run_dir / "results.json"
@@ -131,7 +132,7 @@ def main() -> None:
         records = payload["records"][: args.limit]
 
         if model is None:
-            adapter = str(ROOT / args.ckpt) if args.ckpt else None
+            adapter = os.path.abspath(args.ckpt) if args.ckpt else None
             use_4bit = bool(cfg["model"].get("load_in_4bit", True))
             model, tokenizer = load_hf_policy(cfg, adapter, use_4bit)
 

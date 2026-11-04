@@ -99,7 +99,7 @@ def load_for_eval(cfg, max_seq_length: int, checkpoint: str | None = None):
         print(f"[model] loading LoRA adapter: {path}")
         lora_request = model.load_lora(path)
     else:
-        print("[model] no adapter: evaluating the frozen base model")
+        print("[model] base weights loaded, no adapter attached")
 
     model = model.eval()
     return model, tokenizer, lora_request

@@ -1,7 +1,7 @@
 model:
   name: llama
 
-  # checkpoints live in ckpt/<METHOD>/<ckpt_name>/
+  # backbone tag in run names (and ckpt/<METHOD>/<ckpt_name>/ without --exp-name)
   ckpt_name: llama8b
   hf_id: unsloth/meta-Llama-3.1-8B-Instruct   # fp16 re-upload of the gated meta-llama repo, identical weights
 

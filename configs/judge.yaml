@@ -1,5 +1,6 @@
 # LLM judge: equivalence between two rollouts, and correctness against the gold answer.
-# Credentials come from the env only: OPENAI_API_KEY (+ OPENAI_API_VERSION and OPENAI_AZURE_ENDPOINT for Azure).
+# The hosted judge reads OPENAI_API_KEY from the env (+ OPENAI_API_VERSION and
+# OPENAI_AZURE_ENDPOINT for Azure); api_key below is only for a base_url server.
 
 judge:
   # Correctness is always judged by the model below. `equivalence: f1` replaces only
@@ -45,8 +46,9 @@ judge:
     Your response should use the following format:
     Correct: <yes or no>
 
-  # OOD correctness: TriviaQA always multi-gold, NQ-Open/MSMARCO pick by gold count,
-  # HotpotQA uses judge_prompt. Directional: {a} is the candidate, {b} the reference.
+  # Correctness on datasets with correctness_prompt: gold (TriviaQA, NQ-Open, MSMARCO),
+  # single or multi by gold count; the others use judge_prompt. Directional: {a} is
+  # the candidate, {b} the reference.
   single_gold_prompt: |-
     Given a question, one generated answer, and the gold correct answer, determine whether the generated answer matches the gold answer in meaning. Respond with "yes" or "no".
     Your response should be completely based on the similarity between the generated answer and the gold correct answer.

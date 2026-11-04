@@ -61,6 +61,9 @@ def generate(model, tokenizer, prompt: str, *, n: int = 1, temperature: float = 
                                       lora_request=lora_request)
         return [str(o.text or "") for o in outputs[0].outputs]
 
+    if lora_request is not None:
+        # the adapter only reaches vLLM; without it the base model would be scored
+        raise RuntimeError("checkpoint evaluation needs model.fast_inference=true")
     device = next(model.parameters()).device
     encoded = tokenizer(prompt, return_tensors="pt").to(device)
     prompt_len = encoded["input_ids"].shape[-1]

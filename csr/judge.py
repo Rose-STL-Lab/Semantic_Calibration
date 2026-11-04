@@ -219,11 +219,12 @@ class Judge:
         # max(1, max_retries) passes in total
         in_flight_cap = max(int(self.batch_size), 4 * self.max_workers)
         stats["total"] += len(pending)
-        for _ in range(max(1, self.max_retries)):
+        for attempt in range(max(1, self.max_retries)):
             if not pending:
                 break
             still_pending: list[int] = []
             first_error = None
+            n_errors = 0
             workers = min(self.max_workers, len(pending)) or 1
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 for start in range(0, len(pending), in_flight_cap):
@@ -233,13 +234,20 @@ class Judge:
                         idx, verdict, error = future.result()
                         if verdict is None:
                             still_pending.append(idx)
-                            first_error = first_error or error
+                            if error is not None:
+                                n_errors += 1
+                                first_error = first_error or error
                             continue
                         labels[idx] = int(verdict)
                         stats["parsed_yes" if verdict == 1 else "parsed_no"] += 1
                         self.cache.set_item(keys[idx], int(verdict))
             if first_error is not None:
-                print(f"[judge] {len(still_pending)} calls failed, e.g. "
+                # every request of a sizeable first pass erroring is a setup problem
+                # (bad parameter, endpoint down), not noise: stop instead of scoring 0
+                if attempt == 0 and n_errors == len(pending) and n_errors >= 8:
+                    raise RuntimeError(f"all {n_errors} judge requests failed, e.g. "
+                                       f"{type(first_error).__name__}: {first_error}")
+                print(f"[judge] {n_errors} requests failed, e.g. "
                       f"{type(first_error).__name__}: {first_error}", file=sys.stderr, flush=True)
             pending = still_pending
 

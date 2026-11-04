@@ -35,12 +35,9 @@ DATASETS = ("hotpot", "trivia", "msmarco", "nq_open")
 def extracted_answers(record: dict) -> list[str]:
     answers = []
     for rollout in record["rollouts"]:
-        answer = (
-            rollout.get("extracted_answer")
-            or rollout.get("answer")
-            or rollout.get("full_answer")
-            or ""
-        )
+        # the string eval_semantic.py clustered on, empty answers included
+        answer = (rollout["extracted_answer"] if "extracted_answer" in rollout
+                  else rollout.get("full_answer") or "")
         answers.append(str(answer))
     return answers
 
@@ -89,8 +86,7 @@ def main() -> None:
                     f"produce it first with:\n"
                     f"  python evaluation/eval_semantic.py --method CSR --model <key> "
                     f"--dataset {dataset} --exp-name {source_name} "
-                    f"--ckpt <f1-trained checkpoint> "
-                    f"--set judge.equivalence=f1 --set judge.f1_threshold={threshold}")
+                    f"--ckpt <f1-trained checkpoint>")
             source = json.loads(source_path.read_text(encoding="utf-8"))
 
             if source.get("status") != "final" or source.get("n_records") != 1000:
@@ -210,10 +206,11 @@ def main() -> None:
     for model in MODELS:
         model_rows = [row for row in manifest["runs"] if row["model"] == model]
         if model_rows:
-            manifest["macro_averages"][model] = {
-                key: sum(row[key] for row in model_rows) / len(model_rows)
-                for key in ("accuracy", "ece", "brier", "auroc", "avg_confidence")
-            }
+            averages = {}
+            for key in ("accuracy", "ece", "brier", "auroc", "avg_confidence"):
+                values = [row[key] for row in model_rows if row[key] is not None]
+                averages[key] = sum(values) / len(values) if values else None
+            manifest["macro_averages"][model] = averages
 
     write_json_atomic(manifest_path, manifest)
     print(json.dumps(manifest["macro_averages"], indent=2))
