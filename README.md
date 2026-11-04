@@ -2,8 +2,6 @@
 <p align="center">
     <a href="https://arxiv.org/abs/2605.15588"> <img src="https://img.shields.io/badge/arXiv-2605.15588-b31b1b" alt="arXiv"> </a>
     <img src="https://img.shields.io/badge/NeurIPS'26-blue" alt="NeurIPS 2026">
-    <img src="https://img.shields.io/badge/python-3.11-blue" alt="python">
-    <img src="https://img.shields.io/badge/PyTorch-2.9-ee4c2c" alt="pytorch">
 </p>
 
 Hi, this is the code for our NeurIPS 2026 paper:
@@ -32,7 +30,7 @@ estimators reported in the appendix.
 | `evaluation/` | `eval_semantic.py` (sampling-based) and `eval_verbalized.py` (verbalized-confidence baselines) |
 | `configs/` | YAML defaults, split into `methods/`, `models/`, `datasets/`, plus `judge.yaml` |
 | `analysis/` | Post-hoc estimators and aggregation rules reported in the appendix |
-| `scripts/` | `serve/serve_judge.sh`, re-judging, and result collection |
+| `scripts/` | `serve/serve_judge.sh` (local judge) and `f1_judge_eval.py` (token-F1 clustering) |
 | `rd_util/` | Utilities for the Rewarding-Doubt baseline, kept close to upstream |
 
 # Getting started
@@ -76,15 +74,6 @@ The default is GPT-4.1-nano on the hosted OpenAI endpoint, so all it needs is a 
 export OPENAI_API_KEY=sk-...
 ```
 
-Nothing else: `configs/judge.yaml` already holds the model, the temperature and the
-retry policy.
-
-**The numbers reported in the paper do not come from this default.** Every result was
-produced with a locally served `gpt-oss-20b` judge and the four overrides shown below.
-The hosted GPT-4.1-nano default is a convenience for getting a first run moving; the two
-judges disagree often enough that their numbers are not comparable, so reproducing a
-table means serving gpt-oss-20b.
-
 To run a local judge instead — gpt-oss-20b, or any other model vLLM can serve — start a
 server and point the config at it:
 
@@ -113,16 +102,15 @@ reports, with `judge.f1_threshold` 0.50 for Llama and Mistral and 0.80 for Qwen.
 
 ## 3. Prepare Datasets
 
-Datasets are pulled from the HuggingFace Hub on first use and cached under `data/`; no
-manual download is needed. Checkpoints, evaluation records and logs are written beside
-it, and none of these directories are tracked:
+Datasets are pulled from the HuggingFace Hub on first use; no manual download is
+needed. They land in the HuggingFace cache (`HF_HOME`, `~/.cache/huggingface` by
+default). Checkpoints and evaluation records are written inside the repository, and
+neither directory is tracked:
 
 ```
 .
-├── data            # HuggingFace datasets and hub cache
 ├── ckpt            # ckpt/<METHOD>/<run>/checkpoint-<step>
-├── results         # results/<run>/{config.yaml,results.json,results.csv}
-└── logs
+└── results         # results/<run>/{config.yaml,results.json,results.csv}
 ```
 
 | | Available |
@@ -147,8 +135,10 @@ python train/train_CSR.py --model qwen --dataset hotpot [--set key=value ...]
 older stack, so activate the environment built from `requirements-rd.txt` for it and the
 unsloth one for the other three.
 
-The RD defaults in `configs/methods/rd.yaml` reproduce the upstream Rewarding-Doubt
-release. The RD rows in the paper turn on the flags documented there:
+The RD defaults in `configs/methods/rd.yaml` follow the upstream Rewarding-Doubt
+release, with two departures: LoRA rank 32 instead of 8, and an F1@0.5 correctness
+reward instead of exact match on the free-form datasets. The RD rows in the paper also
+turn on these flags:
 
 ```bash
 python train/train_RD.py --model qwen --dataset hotpot \
@@ -227,8 +217,8 @@ no estimator here is ever used during training:
 | `analysis/aggregation.py` | SIMBA-UQ's arithmetic aggregation and the `clf-pairs+gen` classifier |
 | `analysis/selective.py` | Selective prediction (AURAC, AUGRC) |
 
-Semantic Density and both SIMBA rules read one extra per-rollout feature, the mean token
-log-probability. `analysis/logprobs_hf.py` writes it once per run and is the only script
+Semantic Density and the `clf-pairs+gen` classifier read one extra per-rollout feature,
+the mean token log-probability. `analysis/logprobs_hf.py` writes it once per run and is the only script
 here that loads the backbone, so it is the one that needs a GPU:
 
 ```bash
