@@ -29,8 +29,7 @@ def exact_match_score(prediction: str, ground_truth: str) -> float:
 
 
 def exact_match_any(prediction: str, gold) -> float:
-    # gold may be a list of aliases; stringified whole it would never match.
-    # Mirrors rd_util/EvaluationMetrics.py.
+    # best match over a list of aliases
     if isinstance(gold, (list, tuple)):
         return max((exact_match_score(prediction, g) for g in gold), default=0.0)
     return exact_match_score(prediction, gold)
@@ -149,9 +148,7 @@ ANSWER_TAG_INSTRUCTION = (
 
 
 def _sample_removed_titles(example, rng: random.Random) -> Tuple[int, List[str]]:
-    # drop paragraphs so the model sometimes lacks the evidence it needs: genuinely
-    # unanswerable questions are the point of training a confidence head. RLCR
-    # training only -- the shared context table in csr/data.py keeps every paragraph.
+    # RLCR training drops paragraphs so some questions lack evidence; eval keeps them all
     supporting = list(example["supporting_facts"]["title"])
     all_titles = list(example["context"]["title"])
     non_supporting = list(set(all_titles) - set(supporting))

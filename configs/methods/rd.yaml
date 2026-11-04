@@ -20,57 +20,45 @@ method:
     max_validation_samples: 1000
     max_eval_train_samples: 1000
     save_every_steps: 125      # checkpoint cadence, 10 checkpoints over the 1250-step run
-    # Mid-training validation on the eval split, every 0.1 epoch (1250 steps per
-    # epoch) and skipped at the last step. 0, or more steps than the run, turns it
-    # off; checkpoints are saved every save_every_steps either way and can be
-    # scored afterwards with evaluation/eval_verbalized.py.
+    # Mid-training validation every 0.1 epoch (1250 steps), skipped at the last
+    # step; 0, or more steps than the run, turns it off.
     eval_every_steps: 125
     reward_log_interval: 10
     shuffle_seed: 42
 
     ppo_max_new_tokens: 500
-    # Sampling temperature of the stage-2 (confidence) generation that PPO trains
-    # on. null is upstream: each model's own generation_config applies (qwen 0.7,
-    # llama 0.6, mistral 1.0) although PPO scores the samples at 1.0. 1.0 samples
-    # from the policy being optimized, the same for every model.
+    # Temperature of the stage-2 (confidence) generation PPO trains on. 1.0 samples
+    # from the policy PPO scores; null uses each model's generation_config (upstream).
     ppo_temperature: 1.0
-    # Explicitly disable Qwen2.5's inherited repetition_penalty 1.05: PPO scores
-    # unpenalized logits. Set null only to reproduce the legacy sampler.
+    # Disables Qwen2.5's inherited repetition_penalty 1.05: PPO scores unpenalized
+    # logits. null keeps the model's own setting.
     ppo_repetition_penalty: 1.0
 
     # Stop stage 1 at " Confidence" as upstream does, so the PPO response is the
     # confidence and that token receives the gradient. false lets stage 1 run to EOS.
     confidence_stop: true
 
-    # TRL's adaptive KL controller moves kl_coef by (kl/target - 1) * step/horizon per
-    # step. At the default 10000 it barely reacts on the ~50-step scale on which a
-    # policy can lock onto a constant confidence. 10000 is upstream.
+    # horizon of TRL's adaptive KL controller; 10000 (upstream) adapts slowly
     kl_horizon: 10000
 
-    # Gradient-norm clip for the PPO update. null (no clipping) is upstream. A base
-    # model whose confidence prior sits on the reward's one negative point (a
-    # confidence of 10) takes very large first PPO steps; clipping bounds them.
+    # Gradient-norm clip for the PPO update; null (no clipping) is upstream.
     max_grad_norm: null
 
-    # Training parser without the independent-field fallback, as upstream's single
-    # regex: "Answer: Confidence: 0" and period-separated refusals become format
-    # failures (-30) instead of the +10 a wrong answer earns at confidence 0. Comma
-    # and newline separators are accepted.
+    # Training parser matches upstream's single regex: malformed outputs such as
+    # "Answer: Confidence: 0" are format failures. Comma and newline separators pass.
     strict_format: true
 
     # TRL's per-step early stop on the policy KL between PPO epochs.
     ppo_early_stopping: false
     ppo_target_kl: 1.0
 
-    # PPO optimizer-step granularity: mini_batch_size * gradient_accumulation_steps samples
-    # per update. null = batch_size / 2 with no accumulation (upstream). Setting 2 and 2
-    # for batch 8 gives the identical update at half the activation memory.
+    # samples per PPO update = mini_batch_size * gradient_accumulation_steps;
+    # null = batch_size / 2 with no accumulation (upstream)
     ppo_mini_batch_size: null
     ppo_gradient_accumulation_steps: 1
 
-    # Generate one prompt at a time (both stages, no pad tokens). Needed for
-    # hotpot_context: on 1-2k-token prompts unsloth's batched inference returns
-    # garbage for the left-padded rows. false is upstream (batched, left-padded).
+    # Generate one prompt at a time (no padding). Needed for long-context sets, where
+    # unsloth's batched inference corrupts left-padded rows. false is upstream.
     unpadded_generation: false
 
     # sampling for the periodic train/validation generations, not the PPO rollouts
@@ -87,9 +75,8 @@ method:
     max_seq_length: 1024
     ece_bins: 10
 
-# RD asks for "'Answer: <a>, Confidence: <c>' and nothing else", and a reasoning
-# trace spends the rollout budget before reaching it. Ignored by templates without
-# the flag (Qwen2.5-7B, Llama-3.1-8B, Mistral-7B-v0.3).
+# RD's output format leaves no room for a reasoning trace. Ignored by templates
+# without the flag.
 model:
   chat_template_kwargs:
     enable_thinking: false

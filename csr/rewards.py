@@ -12,10 +12,8 @@ import torch
 from .parsing import strip_prompt_prefix, extract_user_question, normalize_for_equiv
 
 
-# reachable endpoints of the per-pair BCE. r_cal = (CE_MAX - mean_ce) / DELTA_CE is
-# an exact affine map, not upstream's clamp(5 - ce, 0, 5) hinge (which collapses
-# every rollout with >=3 mismatching peers onto 0). For binary verdicts r_cal is
-# exactly the agreement fraction 1 - m/(K-1): one of 0, 1/(K-1), ..., 1.
+# reachable endpoints of the per-pair BCE; r_cal = (CE_MAX - mean_ce) / DELTA_CE maps
+# them affinely onto [0, 1], so for binary verdicts r_cal is the agreement fraction.
 EPS = 1e-6
 CE_MIN = -math.log1p(-EPS)      # 1.0000e-06, reached when the verdict matches
 CE_MAX = -math.log(EPS)         # 13.8155,    reached when it does not
@@ -38,9 +36,8 @@ def gold_for_row(answer, index: int, batch: int, n: int):
 
 
 def row_questions(prompts, question=None) -> list[str]:
-    # the dataset's own question column, which TRL hands every reward function; on
-    # context datasets the user turn is "Context: ... Question: q", and the judge,
-    # which keeps the first 1000 chars, would see passages in place of the question
+    # prefer the dataset's question column: on context datasets the user turn starts
+    # with the passages, which the judge's truncation would keep instead of the question
     if question is not None:
         if len(question) != len(prompts):
             raise ValueError(f"expected one question per prompt, got {len(question)} "
@@ -58,7 +55,7 @@ class RewardComputer:
         self.corr_w = float(train_cfg.get("corr_w", 1.0))
         self.cali_w_start = float(train_cfg.get("cali_w_start", 0.0))
         self.cali_w_end = float(train_cfg.get("cali_w_end", 0.0))
-        # "linear" default keeps existing runs; start == end makes any schedule constant
+        # start == end makes any schedule constant
         self.cali_w_schedule = str(train_cfg.get("cali_w_schedule", "linear")).lower()
         self.cali_w_sigmoid_slope = float(train_cfg.get("cali_w_sigmoid_slope", 10.0))
         if self.cali_w_schedule not in ("linear", "sigmoid"):
@@ -70,8 +67,7 @@ class RewardComputer:
 
     # -- calibration weight schedule -------------------------------------
     def _schedule_fraction(self, p: float) -> float:
-        # fraction of the start -> end travel done at p; the sigmoid is rescaled to hit
-        # exactly 0 and 1 (raw slope 10 would start at 0.0067, missing cali_w_start)
+        # fraction of the start -> end travel at p; the sigmoid is rescaled to hit 0 and 1
         if self.cali_w_schedule == "linear":
             return p
         a = self.cali_w_sigmoid_slope
@@ -157,8 +153,7 @@ class RewardComputer:
                     owners.extend((j, i))
                     verdicts_ji.extend((verdict, verdict))
 
-                # float64: in float32 the s=1,q=0 branch leaves a 9.5e-4 residue that
-                # would blur the exact 0/1 endpoints
+                # float64: float32 leaves a residue at the s=1, q=0 endpoint
                 owner_idx = torch.tensor(owners, dtype=torch.long)
                 s = torch.tensor(verdicts_ji, dtype=torch.float64)
                 q_pair = q.to(torch.float64)[owner_idx]
@@ -177,8 +172,7 @@ class RewardComputer:
                 mean_ce = ce_sum / count.clamp_min(1.0)
                 per_peer = (CE_MAX - mean_ce) / DELTA_CE
                 if bool(has_evidence.any()):
-                    # every pair dropped -> group mean, so no evidence means zero
-                    # advantage, not a worst score
+                    # rollouts with no readable pair get the group mean (zero advantage)
                     fallback = per_peer[has_evidence].mean()
                 else:
                     fallback = torch.tensor(0.5, dtype=torch.float64)
@@ -195,7 +189,6 @@ class RewardComputer:
         self._verdict_cache[self._batch_key(prompts, completions, answer, question)] = verdicts
         return (rewards * float(self.cali_w)).tolist()
 
-
     @torch.no_grad()
     def correctness_reward(self, prompts, completions, answer, question=None, **_):
         n, batch = len(completions), len(prompts)
@@ -209,12 +202,9 @@ class RewardComputer:
 
         answers = [normalize_for_equiv(c, self.markers) for c in completions]
         questions = self._questions(prompts, question)
-        # the alias list must stay intact: normalize_for_equiv keeps only the first
-        # alias, so "Mumbai" would miss gold ["Bombay", "Mumbai"]
+        # keep the alias list intact; format_gold renders it as the eval path does
         golds = [gold_for_row(answer, i, batch, n) for i in range(n)]
 
-        # score_against_gold_batch renders each gold with format_gold and picks the
-        # template per row, exactly as the evaluation path does
         before = int(self.judge.correctness_stats["unparsed"])
         rows = self.judge.score_against_gold_batch(
             preds_list=[[a] for a in answers], golds=golds,
@@ -227,9 +217,8 @@ class RewardComputer:
 
     # -- TRL wiring -------------------------------------------------------
     def reward_funcs(self, reward: str) -> list:
-        # closures, not bound methods: TRL names each logged mean after __name__.
-        # TRL sums them (corr_w * q + cali_w * r_cal) under its default
-        # scale_rewards="group", which this reward relies on and never overrides.
+        # closures, not bound methods: TRL names each logged reward after __name__.
+        # TRL sums them (corr_w * q + cali_w * r_cal) with its default scale_rewards="group".
 
         def correctness_reward(prompts, completions, answer, **kwargs):
             return self.correctness_reward(prompts, completions, answer, **kwargs)

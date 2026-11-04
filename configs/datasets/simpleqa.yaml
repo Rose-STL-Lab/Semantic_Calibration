@@ -1,8 +1,7 @@
 dataset:
   name: simpleqa
 
-  # one 'test' split of 4,326 questions, closed-book, no context. 10k train is
-  # impossible: a 1000-question eval head leaves 3,326 for training.
+  # a single 4,326-question test split: the first 1000 are eval, the rest train
   hf:
     path: basicv8vc/SimpleQA
   train_split: test

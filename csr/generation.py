@@ -1,9 +1,6 @@
-# Rollout generation + the prompt rendering that feeds it.
-# generate(prompt, n=K) -> K rollouts for ONE prompt: one vLLM call on unsloth's
-# fast path, else K HuggingFace calls.
-# generate_batch(prompts, n=K) -> K rollouts for EACH prompt, K x len(prompts)
-# completions in one call. That is --question-batch: it amortises the judge's
-# tail latency, same K.
+# Rollout generation and prompt rendering.
+# generate(prompt, n=K) -> K rollouts for one prompt (vLLM fast path, else HF).
+# generate_batch(prompts, n=K) -> K rollouts for each prompt in one call (--question-batch).
 
 from __future__ import annotations
 
@@ -13,10 +10,8 @@ import torch
 
 
 def render_generation_prompt(prompt_messages, tokenizer, template_kwargs=None) -> str:
-    # chat template, else plain concat. template_kwargs = the model yaml's
-    # chat_template_kwargs -- template variables, not generation args:
-    #   Qwen3 enable_thinking=False -> empty <think></think>
-    # a key the template never reads is ignored
+    # chat template, else plain concat; template_kwargs are the model yaml's
+    # chat_template_kwargs (e.g. Qwen3 enable_thinking=False)
     if isinstance(prompt_messages, list) and hasattr(tokenizer, "apply_chat_template") \
             and getattr(tokenizer, "chat_template", None):
         return tokenizer.apply_chat_template(
@@ -38,9 +33,8 @@ def count_tokens(tokenizer, text) -> int:
 
 
 def _use_vllm(model) -> bool:
-    # fast_generate is on both branches: unsloth wraps model.generate with it even
-    # when fast_inference is off, so it is not a vLLM test. The sibling attribute
-    # is -- vLLM gets a functools.partial, plain HF the error_out_no_vllm stub.
+    # unsloth sets fast_generate even without vLLM; fast_generate_batches is the
+    # error_out_no_vllm stub in that case
     if not hasattr(model, "fast_generate"):
         return False
     batches = getattr(model, "fast_generate_batches", None)
@@ -84,23 +78,19 @@ def generate(model, tokenizer, prompt: str, *, n: int = 1, temperature: float = 
         kwargs["temperature"] = float(temperature)
         kwargs["top_p"] = float(top_p)
 
-    # one call for all n samples instead of n sequential calls; greedy decoding
-    # has only one distinct sample, so it stays at 1
+    # greedy decoding has one distinct sample
     n_return = int(n) if do_sample else 1
     if n_return > 1:
         kwargs["num_return_sequences"] = n_return
     output = model.generate(**kwargs)
 
-    # skip_special_tokens=False on purpose: for a channel-structured model the
-    # control tokens are the only thing separating reasoning from the answer,
-    # and dropping them here is unrecoverable. The trailing ones are peeled
-    # later by strip_chat_markers via the model's chat_end_markers.
+    # keep special tokens: channel-structured models need them to separate reasoning
+    # from the answer; trailing ones are stripped later via chat_end_markers
     completions = [
         tokenizer.decode(row[prompt_len:], skip_special_tokens=False)
         for row in output[:n_return]
     ]
-    # only reachable at temperature 0, where the n samples are identical by
-    # definition, so padding them out is not inventing diversity
+    # temperature 0 only: the n samples are identical
     while len(completions) < int(n):
         completions.append(completions[-1] if completions else "")
     return completions
@@ -114,15 +104,14 @@ def _token_report(tokenizer, prompt: str, raw: list[str]) -> dict:
         "raw": raw,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
-        # what the paper's Tok column measures: the whole cost of answering once
-        "total_tokens": prompt_tokens * len(raw) + sum(completion_tokens),
+        # Tok: the prompt once, plus every rollout's completion
+        "total_tokens": prompt_tokens + sum(completion_tokens),
     }
 
 
 def rollouts_with_tokens(model, tokenizer, prompt: str, *, n: int, temperature: float,
                          top_p: float, max_new_tokens: int, seed: int,
                          lora_request=None) -> dict:
-    # plus the prompt / completion token cost
     raw = generate(model, tokenizer, prompt, n=n, temperature=temperature, top_p=top_p,
                    max_new_tokens=max_new_tokens, seed=seed, lora_request=lora_request)
     return _token_report(tokenizer, prompt, raw)

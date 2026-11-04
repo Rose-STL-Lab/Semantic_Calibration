@@ -66,14 +66,9 @@ method:
     max_seq_length: 4096
     ece_bins: 10
 
-# RLCR writes its own <think> block: the format above is mandated by the prompt
-# and reinforced by training, not produced by a backbone's native reasoning mode
-# -- Qwen2.5-7B-Instruct has no enable_thinking in its chat template at all, yet
-# RLCR/qwen7b emits <think> on 100% of records. So a model config that prefills an
-# empty <think></think> (configs/models/qwen14b.yaml, for the Answer:-extracting
-# methods) would close the block before RLCR can write into it. Undo it here; this
-# is merged after the model config (csr/config.py:87-95) so it wins, and it is a
-# no-op on templates that never read the flag.
+# RLCR writes its own <think> block, so undo a model config that prefills an empty
+# one (e.g. qwen14b.yaml). Method configs merge after model configs, so this wins;
+# templates without the flag ignore it.
 model:
   chat_template_kwargs:
     enable_thinking: true

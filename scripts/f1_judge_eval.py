@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-# Rebuild F1-train + F1-eval runs by reclustering saved rollouts; sources untouched.
-# Rollouts are not regenerated and correctness stays the existing judge
-# labels, so only confidence and clusters change. Output: a separate *_semf1_k16 dir.
+"""Build F1-train + F1-eval runs by reclustering saved rollouts with token-F1 equivalence.
+
+Rollouts and correctness labels are reused from the source run; only clusters and
+confidence change. Each result goes to a separate *_semf1_k16 directory.
+"""
 
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ from csr.semantic import semantic_confidence
 
 
 RESULTS = ROOT / "results"
-# per-family F1 thresholds: the paper's tau values
+# per-family F1 thresholds (tau)
 MODELS = {
     "llama8b": {"tag": "050", "threshold": 0.50},
     "qwen7b": {"tag": "080", "threshold": 0.80},
@@ -53,8 +55,6 @@ def write_json_atomic(path: Path, payload: dict) -> None:
 
 
 def main() -> None:
-    # argparse, so --help is help: without it any argument is ignored and the
-    # script rebuilds all 12 target dirs on the spot
     import argparse
     ap = argparse.ArgumentParser(description=__doc__ or "")
     ap.add_argument("--models", nargs="+", default=list(MODELS), choices=list(MODELS),
@@ -120,8 +120,7 @@ def main() -> None:
                 record["num_semantic_clusters"] = block["num_clusters"]
                 record["semantic_entropy"] = block["semantic_entropy"]
                 record["confidence"] = block["confidence"]
-                # extracted_answers walks record["rollouts"] in order, so the ids
-                # line up; analysis/ recomputes clusters from the rollout level
+                # analysis/ reads clusters from the rollout level
                 for rollout, cluster_id in zip(record["rollouts"], block["cluster_ids"]):
                     rollout["semantic_id"] = cluster_id
 

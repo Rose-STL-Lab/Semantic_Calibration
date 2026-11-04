@@ -25,11 +25,8 @@ from csr.config import (add_common_args, checkpoint_dir, dump_config, load_confi
 
 from trl import PPOConfig
 import trl.trainer.ppo_trainer as _trl_ppo
-# unsloth >= 2025.3 (needed for Qwen3) rebinds the names inside trl.trainer.ppo_trainer
-# on import -- PPOTrainer, PPOConfig -- with compiled variants whose __init__ does not
-# run on trl 0.8.6. The PPO subclass is bound to the original class before unsloth
-# loads, and the module's names are put back afterwards; on unsloth 2025.1 nothing
-# changes and both steps are no-ops.
+# unsloth >= 2025.3 rebinds PPOTrainer/PPOConfig in trl.trainer.ppo_trainer with variants
+# that break on trl 0.8.6: subclass before unsloth loads, then restore the module's names.
 _trl_ppo_names = dict(vars(_trl_ppo))
 from rd_util.ppo_trainer_no_cache import PPOTrainerNoCache
 from torch.utils.data import DataLoader
@@ -69,16 +66,11 @@ def rd_dataset_name(name: str) -> str:
     return RD_DATASET_NAMES[name]
 
 
-# stop ids = EOS + the model's end-of-turn markers from its config (upstream hardcoded
-# Llama's <|eot_id|>); markers absent from this vocabulary are skipped
 class StopAtConfidence(StoppingCriteria):
     """Stop stage 1 once the generation has written the word "Confidence".
 
-    Upstream stops on the single token " Confidence", which exists for Qwen and
-    Llama but not for Mistral, where the word always splits ("Conf" + "idence").
-    Stopping on the shared sub-token is not an option either: "idence" also ends
-    evidence, residence, incidence and Providence. So the word's final token only
-    pre-filters, and a short decoded tail confirms it.
+    Upstream stops on the token " Confidence", which Mistral lacks; the word's
+    final token pre-filters and a short decoded tail confirms the whole word.
     """
 
     def __init__(self, tokenizer, prompt_len: int, word: str = "Confidence", tail: int = 16):
@@ -108,17 +100,11 @@ class StopAtConfidence(StoppingCriteria):
 class StopAfterConfidenceValue(StoppingCriteria):
     """End the PPO continuation once the confidence value is complete.
 
-    The query already ends in "Confidence". Callers size the decoded tail to
-    include the whole continuation budget plus the query's field marker, so even
-    a long decimal cannot push the marker out. A digit run must be followed by a
-    non-digit before stopping, or "10" would be cut to "1". Qwen and Llama emit
-    their chat-end token right after the value anyway; Mistral keeps talking for
-    a few hundred tokens, which would spread the reward over the ramble.
+    The value must be followed by a non-digit, so "10" is not cut to "1". Needed
+    for models (Mistral) that keep generating after the value.
     """
 
-    # the decimal part must be inside the match, or "5.0" stops at "5."; a dot
-    # only terminates when what follows it is not a digit, which is how a full
-    # stop ("Confidence: 7. The answer...") is told apart from a decimal point
+    # a dot ends the value only if no digit follows ("7." vs "5.0")
     PATTERN = re.compile(r"Confidence\s*:\s*[*_`\s]*-?\d+(?:\.\d+)?(?:[^\d.]|\.[^\d])")
 
     def __init__(self, tokenizer, tail: int = 48):
@@ -128,8 +114,7 @@ class StopAfterConfidenceValue(StoppingCriteria):
     def __call__(self, input_ids, scores, **kwargs):
         window = input_ids[:, -self.tail:]
         tails = self.tokenizer.batch_decode(window, skip_special_tokens=True)
-        # A wider window can include examples in the question; only the final
-        # Confidence field is the report being continued here.
+        # only the last Confidence field is the one being continued
         return torch.tensor([bool(self.PATTERN.search(tail[tail.rfind("Confidence"):])) for tail in tails],
                             dtype=torch.bool, device=input_ids.device)
 
@@ -137,13 +122,10 @@ class StopAfterConfidenceValue(StoppingCriteria):
 @torch.no_grad()
 def sample_without_cache(model, tokenizer, ids, *, max_new_tokens: int, temperature: float,
                          top_p: float, stop_ids, value_stop=None):
-    """One full forward per generated token, no KV cache.
+    """Sample without KV cache, one full forward per token.
 
-    unsloth's fast generate returns corrupted continuations for some long prompts
-    (a 1399-token hotpot_context prefix: greedy ": 1\n<|im_start|>ote" where the
-    full forward puts all its mass on ": 9<|im_end|>"); the forward itself is sound,
-    so the stage-2 value (a handful of tokens) is sampled from it directly. Same
-    semantics as generate(do_sample=True, top_k=0): softmax(logits / T), nucleus top_p.
+    Works around unsloth's fast generate corrupting some long-prompt continuations.
+    Same semantics as generate(do_sample=True, top_k=0) with nucleus top_p.
     """
     seq = ids[None] if ids.dim() == 1 else ids
     start = seq.shape[1]
@@ -168,6 +150,8 @@ def sample_without_cache(model, tokenizer, ids, *, max_new_tokens: int, temperat
     return seq[0, start:]
 
 
+# EOS + the model's end-of-turn markers (upstream hardcoded Llama's <|eot_id|>);
+# markers absent from the vocabulary are skipped
 def terminator_ids(tokenizer, chat_end_markers):
     ids = [tokenizer.eos_token_id]
     for marker in chat_end_markers or []:
@@ -291,11 +275,9 @@ def save_training_state(ppo_trainer, out_dir: str, global_step: int, epoch_idx: 
         "best_reward": float(best_reward),
         "best_reward_step": int(best_reward_step),
         "rng_state": _capture_rng_state(),
-        # the fast-forward and the step numbering both divide by this, so a resume
-        # with a different batch_size or max_train_samples has to be refused
+        # a resume with a different batch_size or max_train_samples is refused
         "batches_per_epoch": int(len(ppo_trainer.dataloader)),
-        # what the run was trained under, checked on resume, and the adaptive KL
-        # coefficient, which would otherwise restart at init_kl_coef
+        # checked on resume; kl_coef would otherwise restart at init_kl_coef
         "train_flags": dict(getattr(ppo_trainer, "rd_train_flags", {}) or {}),
         "kl_coef": float(ppo_trainer.kl_ctl.value),
     }
@@ -336,9 +318,7 @@ def resolve_resume(out_dir: str, resume_state_path: str | None = None, resume_au
     state = torch.load(cand, map_location="cpu", weights_only=False)
     if "batches_per_epoch" not in state:
         raise SystemExit(
-            f"{cand} predates the resume fix: it has no batches_per_epoch, and runs "
-            "written then never reloaded their adapter, so the step it claims is not "
-            "the step its weights are at. Start the run over."
+            f"{cand} has no batches_per_epoch and cannot be resumed; start the run over."
         )
     step = int(state["global_step"])
     # a state saved inside a checkpoint directory names its own adapter
@@ -369,7 +349,6 @@ def maybe_load_training_state(ppo_trainer, state_path: str | None):
     saved_flags = state.get("train_flags")
     flags = dict(getattr(ppo_trainer, "rd_train_flags", {}) or {})
     if saved_flags is not None:
-        # states written while the removed freeze_stage1 option existed recorded it as False
         saved_flags = {k: v for k, v in saved_flags.items() if k != "freeze_stage1"}
     if saved_flags is None:
         print(f"[Resume] WARNING: {state_path} has no train_flags; cannot check that "
@@ -533,10 +512,8 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
         learning_rate=lr,
         task_name="gpt",
         batch_size=batchsize,
-        # mini_batch_size * gradient_accumulation_steps samples go into each optimizer
-        # step; the default (batch/2, 1) is upstream. Halving the mini-batch and doubling
-        # the accumulation keeps that product, so the update is unchanged at half the
-        # activation memory (needed for the 32B on a 46 GB card).
+        # default (batch/2, 1) is upstream; halving the mini-batch and doubling the
+        # accumulation gives the same update at half the activation memory (e.g. 32B models)
         mini_batch_size=int(ppo_mini_batch_size) if ppo_mini_batch_size else int(batchsize / 2),
         gradient_accumulation_steps=int(ppo_gradient_accumulation_steps),
         log_with=log_with,
@@ -576,9 +553,7 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
     if confidence_stop:
         prediction_markers.append("\u0120Confidence")
     prediction_terminators = terminator_ids(tokenizer, prediction_markers)
-    # the token id only covers a space-led " Confidence"; "\nConfidence" splits into
-    # "Conf"+"idence" and would slip through, so the decoded word backs it up for every
-    # model. Mistral has no such token at all and relies on the word alone.
+    # the token only covers a space-led " Confidence", so the decoded word backs it up
     word_stop = confidence_stop
     if confidence_stop:
         print(f"[train] confidence_stop terminators={prediction_terminators} "
@@ -675,10 +650,8 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
                 StoppingCriteriaList([StopAtConfidence(tokenizer, int(input_ids.shape[1]))])
                 if word_stop else None)
             if unpadded_generation:
-                # one prompt at a time, no pad tokens anywhere: on prompts of ~1-2k
-                # tokens (hotpot_context) unsloth's batched inference returns garbage
-                # for the left-padded rows ("Answer,000000 and,1000..."), while the
-                # same prompts generate normally on their own
+                # one prompt at a time, unpadded: unsloth's batched inference corrupts
+                # left-padded rows on long prompts (hotpot_context)
                 prediction = []
                 for i in range(len(input_ids)):
                     row = input_ids[i][attention_mask[i].bool()][None]
@@ -692,10 +665,8 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
                                             stopping_criteria=prediction_stop,
                                             **generation_kwargs_prediction)
                 prediction = [remove_padding(p, tokenizer.pad_token_id) for p in prediction]
-            # the collator's left pads were masked out of stage 1 but TRL would hand
-            # them to stage 2 and to the PPO forward with mask 1, so the policy would
-            # be trained on, and could key its confidence to, a run of pad tokens no
-            # prompt has at inference (upstream shares this); strip them by the mask
+            # strip left pads, which TRL would otherwise feed to stage 2 and the PPO
+            # forward unmasked (an upstream issue)
             prompt_lens = [int(attention_mask[i].sum()) for i in range(len(prediction))]
             if not unpadded_generation:
                 prediction = [p[int(input_ids.shape[1]) - n:] for p, n in zip(prediction, prompt_lens)]
@@ -716,9 +687,8 @@ def train(out_dir: str, lr: float, epochs: int, batchsize: int, model_dir: str, 
                 response_tensors = ppo_trainer.generate(prediction, return_prompt=False,
                                                         **generation_kwargs_ppo)
             if confidence_stop and not unpadded_generation:
-                # TRL cuts each row at its first eos and keeps it. A row the value
-                # criterion or a non-eos terminator ended early was right-padded with
-                # pad == eos, so that eos was never sampled, yet it would carry the score
+                # drop the trailing pad (== eos) TRL keeps on rows a stopping criterion
+                # or non-eos terminator ended; that eos was never sampled
                 response_tensors = [
                     r[:-1] if (len(r) > 1 and int(r[-1]) == tokenizer.eos_token_id and (
                         int(r[-2]) in ppo_end_ids

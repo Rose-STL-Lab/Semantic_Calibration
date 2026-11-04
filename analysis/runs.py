@@ -5,7 +5,7 @@ from __future__ import annotations
 
 MODELS = ["llama8b", "qwen7b", "mistral7b"]
 
-# (directory name, label used in the paper's tables)
+# (directory name, display label)
 DATASETS = [
     ("hotpot", "HotpotQA"),
     ("trivia", "TriviaQA"),
@@ -31,7 +31,6 @@ SEMANTIC_METHODS = {"Base", "RLVR", "CSR"}
 # SemDens and the SIMBA rules need per-rollout clusters, which only the sampling
 # methods record -- they iterate this, not RUN_TEMPLATES.
 SEMANTIC_TEMPLATES = {m: t for m, t in RUN_TEMPLATES.items() if m in SEMANTIC_METHODS}
-
 
 
 def run_name(method: str, model: str, dataset: str) -> str:

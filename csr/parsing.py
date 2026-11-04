@@ -63,9 +63,7 @@ def clean_generation(completion, chat_end_markers: Sequence[str] = ()) -> str:
 
 
 def strip_prompt_prefix(completion, chat_end_markers: Sequence[str] = ()) -> str:
-    # everything after the last "Answer:". "Final answer:" (the context split's
-    # closing marker) wins when present; the lower-case "a" keeps the two from
-    # colliding, so closed-book behaviour is unchanged.
+    # everything after the last "Answer:"; "Final answer:" (context prompts) wins if present
     text = clean_generation(completion, chat_end_markers)
     if "Final answer:" in text:
         return text.split("Final answer:")[-1].strip()
@@ -169,11 +167,7 @@ def parse_rd_output(text, separators: Sequence[str] = (",",),
         return answer, None, raw_conf
     if not (0.0 <= value <= scale):
         return answer, None, raw_conf
-    # A decimal <= 1 cannot be an integer on the 0-10 scale the RD prompt asks for, so
-    # it is read as a probability on the 0-1 scale rather than divided by 10 (which
-    # would turn "1.0", a report of certainty, into 0.1). The upstream RD evaluation
-    # has that silent failure: its regex (-?\d+) keeps the "1" of "1.0" before the
-    # division by 10.
+    # a decimal <= 1 is read as a 0-1 probability, so "1.0" means certainty, not 0.1
     if "." in raw_conf and value <= 1.0:
         return answer, float(min(max(value, 0.0), 1.0)), raw_conf
     return answer, float(min(max(value / scale, 0.0), 1.0)), raw_conf
@@ -200,13 +194,7 @@ def parse_rlcr_output(text, chat_end_markers: Sequence[str] = (), scale: float =
     return answer, float(min(max(value / scale, 0.0), 1.0)), raw_conf
 
 
-# unparsable confidence counts as 0. That is what RD does upstream
-# (eval_ood/.../eval_ood_hotpotqa.py: `float(confidence) if confidence is not None else 0.0`),
-# but NOT what RLCR does: its evaluation.py re-prompts the model -- "My verbalized confidence
-# ... is equal to " for a missing <confidence>, "My final answer is " for a missing <answer> --
-# and keeps that second generation. We do not reproduce the re-prompt, so an RLCR answer whose
-# format slips is scored at 0 instead of being asked again: 6.2% of its closed-book hotpot
-# records, under 2% on trivia/nq_open/msmarco.
+# unparsable confidence counts as 0, as in RD's evaluation (RLCR's re-prompting is not reproduced)
 UNPARSED_CONFIDENCE = 0.0
 
 

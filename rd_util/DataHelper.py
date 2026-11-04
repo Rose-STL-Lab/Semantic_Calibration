@@ -12,9 +12,7 @@ class DatasetDescriptor:
     normalize_function: Callable
     type: str
     columns_to_remove: List[str]
-    # Optional: map a requested split name (e.g. "validation") to the dataset's
-    # actual split name (e.g. "test"). Lets datasets that don't ship a
-    # "validation" split (like big-math-digits) work without changing callers.
+    # optional remap of requested split names, e.g. {"validation": "test"}
     split_map: dict = None
 
 class DataCollatorForTokenizedQueries(DataCollatorMixin):
@@ -168,13 +166,8 @@ def _normalize_bigmath_dataset_map_function(sample):
 def _normalize_hotpotqa_context_dataset_map_function(sample):
     """HotpotQA with the distractor passages supplied.
 
-    The passage layout is ``_format_hotpot_context`` from ``csr/data.py`` and the
-    question phrasing is RD's own context phrasing (the same
-    ``f"Context: {context}, Question: {question}"`` that
-    ``_normalize_squad_dataset_map_function`` uses, which is what
-    ``_hotpot_context(..., method="RD")`` renders at evaluation time). Training
-    and evaluation therefore build the prompt identically -- an RD checkpoint
-    only behaves as trained if it sees its own phrasing.
+    Must match ``_hotpot_context(..., method="RD")`` in ``csr/data.py``, so RD is
+    evaluated on the prompt it was trained on.
     """
     question = sample["question"]
     answer = sample["answer"] if sample.get("answer") else ""
@@ -263,7 +256,7 @@ datasets = {
         # big-math-digits has only train/test, no validation split — remap.
         split_map = {"validation": "test"},
     ),
-        "hotpotqa_context": DatasetDescriptor
+    "hotpotqa_context": DatasetDescriptor
     (
         huggingface_config = {"path": "hotpotqa/hotpot_qa", "name": "distractor"},
         normalize_function = _normalize_hotpotqa_context_dataset_map_function,
@@ -288,8 +281,7 @@ def load_prepared_dataset(dataset, split, method, tokenizer, template_kwargs=Non
                           system_prompt=None):
     dataset_descriptor = get_dataset_descriptor(dataset)
 
-    # Allow datasets to remap requested split names (e.g. bigmath has no
-    # "validation" split, only "test").
+    # e.g. bigmath has no "validation" split, only "test"
     if dataset_descriptor.split_map and split in dataset_descriptor.split_map:
         split = dataset_descriptor.split_map[split]
 

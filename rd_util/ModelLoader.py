@@ -9,9 +9,8 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
-# get_peft_model builds a fresh zero-init adapter, so a resumed run has to load the
-# saved weights over it; going through PeftModel.from_pretrained instead would skip
-# unsloth's kernel patching
+# load saved weights over get_peft_model's fresh adapter; PeftModel.from_pretrained
+# would skip unsloth's kernel patching
 def _restore_adapter(peft_model, adapter_dir):
     from peft import set_peft_model_state_dict
     from safetensors.torch import load_file
@@ -55,12 +54,8 @@ def _fastlm_from_pretrained(model_name, max_seq_length, load_in_4bit, fix_tokeni
                             use_exact_model_name=True):
     """Load a base model the way RD's PPO loop expects it.
 
-    Deliberately does NOT pass ``gpu_memory_utilization``: that knob only means
-    something on unsloth's vLLM path (``fast_inference=True``), which RD does not
-    use. On unsloth 2025.1.5 the argument is forwarded into
-    ``LlamaForCausalLM.__init__`` and raises TypeError; retrying after dropping it
-    then trips unsloth's half-applied Trainer patch, which surfaces as a
-    misleading "does not support multi GPU setups" error.
+    Does not pass ``gpu_memory_utilization`` (vLLM-only): unsloth 2025.1.5 forwards
+    it to the model __init__ and fails with a misleading multi-GPU error.
     """
     _disable_shared_gpu_false_positive()
     return FastLanguageModel.from_pretrained(

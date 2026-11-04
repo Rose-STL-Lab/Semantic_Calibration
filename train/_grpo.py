@@ -15,8 +15,7 @@ from csr.config import (add_common_args, checkpoint_dir, load_config,
 def parse_args(method: str, description: str) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=description,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    # 2wiki_comp is evaluation-only (no train_size); naming the trainable datasets
-    # fails before the model loads, as train_RLCR.py and train_RD.py already do
+    # 2wiki_comp is evaluation-only (no train_size)
     add_common_args(parser, with_method=False, dataset_default="hotpot",
                     dataset_choices=["hotpot", "hotpot_context", "trivia",
                                      "msmarco", "nq_open", "musique"])
@@ -67,14 +66,8 @@ def run(args: argparse.Namespace) -> None:
 
     model, tokenizer = load_policy(cfg, int(train_cfg["max_seq_length"]))
 
-    # configs/models/<model>.yaml:chat_template_kwargs, applied at the tokenizer so
-    # it reaches every renderer at once: TRL builds the GRPO prompts through
-    # processing_class.apply_chat_template, and csr/callbacks.py renders the
-    # periodic validation through the same method. Without this a reasoning
-    # backbone trains on its own chain of thought -- the reward judges the trace
-    # instead of the answer, and at this completion budget most traces never
-    # close, so the judge sees no answer at all. setdefault, so an explicit
-    # caller argument still wins.
+    # Apply the model's chat_template_kwargs (e.g. disabling thinking) at the tokenizer,
+    # so both TRL's GRPO prompts and csr/callbacks.py validation pick them up.
     _tmpl_kwargs = cfg["model"].get("chat_template_kwargs") or {}
     if _tmpl_kwargs:
         _orig_apply = tokenizer.apply_chat_template

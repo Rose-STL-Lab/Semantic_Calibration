@@ -15,8 +15,7 @@ dataset:
     default: |-
       Provide a concise and direct answer to the question. Use the provided context and reason step-by-step. End with 'Final answer: <answer>'.
 
-# measured on the full 1000-question eval split: 2538 median, 5370 max. 20 paragraphs
-# against hotpot_context's 10, so it needs a wider window than the other sets.
+# ~20 paragraphs per prompt (up to ~5.4k tokens), so a wider window
 model:
   gpu_memory_utilization: 0.35
 

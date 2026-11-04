@@ -4,8 +4,7 @@ model:
   # checkpoints live in ckpt/<METHOD>/<ckpt_name>/
   ckpt_name: qwen14b
 
-  # the reused RLVR/RD/RLCR adapters were trained on this pre-quantized 4-bit build
-  # and only load on these exact weights -- hence use_exact_model_name: false
+  # the RLVR/RD/RLCR adapters were trained on this pre-quantized 4-bit build
   hf_id: unsloth/qwen3-14b-unsloth-bnb-4bit
   use_exact_model_name: false
 
@@ -15,21 +14,14 @@ model:
 
   verbalized_separators: [",", ";", ":", ".", "\n"]
 
-  # Qwen3 is a reasoning model and thinks by default. Left on, a rollout is a
-  # ~1000-character chain of thought that the Answer:-based extractor returns
-  # whole, so the semantic clustering compares reasoning traces instead of
-  # answers, and at max_new_tokens=256 most rollouts are cut off before the
-  # trace ends and contain no answer at all (measured: 100% carry <think>,
-  # 44-78% hit the cap). Turning it off prefills an empty <think></think> and
-  # the model answers directly, which is what the Qwen2.5-7B main table
-  # measures -- so the scale appendix changes the backbone size and nothing
-  # else, and 256 tokens is sufficient again (measured: 0% truncation).
+  # Qwen3 thinks by default; left on, rollouts are reasoning traces that hit
+  # max_new_tokens before answering. Off, it answers directly like Qwen2.5-7B.
   chat_template_kwargs:
     enable_thinking: false
 
   load_in_4bit: true
-  # vLLM's share of the card -- below the 7B configs because 14B weights leave less
-  # for the training step; raise it for inference-only runs
+  # vLLM's share of the card, lower than 7B to leave room for training;
+  # raise it for inference-only runs
   gpu_memory_utilization: 0.4
 
   lora:

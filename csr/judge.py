@@ -16,8 +16,7 @@ from openai import AzureOpenAI, OpenAI
 
 from .parsing import canonicalize_answer, sanitize_for_judge
 
-# not line-anchored: a verdict sharing its line with prose would otherwise
-# fall through to _YESNO_ANY_RE, which takes the first YES/NO in the whole text
+# not line-anchored, so a verdict sharing its line with prose is still found
 _YESNO_LINE_RE = re.compile(r"(?i)\bCORRECT\s*:\s*(YES|NO)\b")
 _YESNO_ANY_RE = re.compile(r"\b(YES|NO)\b")
 
@@ -54,6 +53,7 @@ class LRUCache(OrderedDict):
         if len(self) > self.max_size:
             self.popitem(last=False)
 
+
 def new_stats() -> dict:
     return {"total": 0, "parsed_yes": 0, "parsed_no": 0, "unparsed": 0}
 
@@ -70,22 +70,18 @@ class Judge:
         self.sleep_sec = float(judge_cfg.get("sleep_sec", 1.5))
         self.max_workers = int(judge_cfg.get("max_workers", 6))
         self.batch_size = int(judge_cfg.get("batch_size", 16))
-        # short per-request timeout: the SDK default is 600 s, so one stalled
-        # connection parks a whole batch. Verdicts are unaffected at temperature 0.
+        # the SDK default timeout is 600 s; one stalled connection would park a batch
         self.request_timeout_sec = float(judge_cfg.get("request_timeout_sec", 20.0))
         self.client_max_retries = int(judge_cfg.get("client_max_retries", 1))
-        # optional self-hosted judge (e.g. local vLLM); unset -> the API client.
-        # A reasoning judge spends tokens before its verdict: raise max_tokens.
+        # optional self-hosted judge (e.g. local vLLM); unset -> the API client
         self.base_url = judge_cfg.get("base_url") or None
         self.base_api_key = judge_cfg.get("api_key") or "EMPTY"
         self.reasoning_effort = judge_cfg.get("reasoning_effort") or None
         self.system_prompt = judge_cfg["system_prompt"]
 
-        # Rollout-vs-rollout equivalence everywhere, and rollout-vs-gold
-        # correctness on datasets whose config asks for it (HotpotQA).
+        # rollout-vs-rollout equivalence, and correctness where the dataset asks for it
         self.prompt = judge_cfg["judge_prompt"]
-        # OOD correctness only, chosen by gold count. Directional: A is the
-        # answer judged, B the reference, never swapped.
+        # directional correctness prompts (A judged, B reference), chosen by gold count
         self.single_gold_prompt = judge_cfg["single_gold_prompt"]
         self.multi_gold_prompt = judge_cfg["multi_gold_prompt"]
 
@@ -98,12 +94,11 @@ class Judge:
     # -- API plumbing ---------------------------------------------------
     @staticmethod
     def _api_key() -> str:
-        for name in ("OPENAI_API_KEY", "OPENAI_API_KEY_4O"):
-            value = os.environ.get(name)
-            if value:
-                return value
+        value = os.environ.get("OPENAI_API_KEY")
+        if value:
+            return value
         raise KeyError(
-            "no judge API key: export OPENAI_API_KEY (or OPENAI_API_KEY_4O), or "
+            "no judge API key: export OPENAI_API_KEY, or "
             "point judge.base_url at a local server, which needs no key.")
 
     @property
@@ -150,8 +145,7 @@ class Judge:
 
     @staticmethod
     def _cache_key(template: str, q: str, a: str, b: str) -> bytes:
-        # The template stays in the key so a prompt edit invalidates the cache
-        # rather than silently reusing verdicts from the old wording.
+        # template in the key so a prompt edit invalidates the cache
         payload = f"{template}\n<|Q|>\n{q}\n<|A|>\n{a}\n<|B|>\n{b}"
         return hashlib.blake2b(payload.encode("utf-8", "ignore"), digest_size=16).digest()
 
@@ -165,9 +159,7 @@ class Judge:
         return_missing: bool = False,
         template: str | None = None,
     ):
-        # template defaults to the symmetric prompt; any other is directional (A and B
-        # keep their roles). -> (labels, n_unparsed), or (labels, n_unparsed, missing)
-        # with return_missing=True; missing indexes the unparsable ones (label 0).
+        # -> (labels, n_unparsed[, missing]); missing indexes unparsable verdicts (label 0)
         assert len(preds) == len(golds) == len(questions)
         template = self.prompt if template is None else template
         stats = stats if stats is not None else self.same_stats
@@ -184,11 +176,9 @@ class Judge:
             q = "" if q is None else str(q)
             a_use = canonicalize_answer(a, self.chat_end_markers)
             b_use = canonicalize_answer(b, self.chat_end_markers)
-            # A and B keep the caller's roles; sorting them canonically would halve
-            # the calls but put gold in the prediction slot in half of correctness.
+            # A and B keep the caller's roles: correctness prompts are directional
             a_uses[i], b_uses[i] = a_use, b_use
 
-            # exact-match shortcut: identical canonical forms need no call
             if a_use != "" and a_use == b_use:
                 labels[i] = 1
                 continue
@@ -219,7 +209,6 @@ class Judge:
                     time.sleep(self.sleep_sec)
             return idx, parse_yes_no(text)
 
-        # one pool over all pending verdicts; a pool per chunk idles on each tail
         in_flight_cap = max(int(self.batch_size), 4 * self.max_workers)
         for _ in range(max(1, self.max_retries)):
             if not pending:
@@ -244,8 +233,7 @@ class Judge:
         unparsed = len(pending)
         if unparsed:
             stats["unparsed"] += unparsed
-            # Not cached: one transient failure would become a permanent NO. Callers
-            # get label 0 plus the index in `missing` and can drop it instead.
+            # not cached, so a transient failure does not become a permanent NO
             for idx in pending:
                 labels[idx] = 0
 
@@ -263,8 +251,7 @@ class Judge:
                                    stats=self.correctness_stats, template=template)
 
     def _gold_template(self, gold, kind: str):
-        # "judge": the equivalence prompt (template None). "gold": single/multi by
-        # gold count. Shared so the batch path cannot drift.
+        # "judge": the equivalence prompt (None); "gold": single/multi by gold count
         if kind == "judge":
             return None
         if isinstance(gold, (list, tuple)) and len(gold) > 1:
@@ -307,12 +294,7 @@ class Judge:
         return out
 
     def assert_parsed(self, max_unparsed_rate: float = 0.02) -> None:
-        """Refuse to let a run be written when the judge was not actually answering.
-
-        A reasoning judge whose verdict does not fit in max_tokens returns an empty
-        message, every call is scored unparsed, and the run still completes -- with
-        every label defaulted. That has to stop the run, not reach results.json.
-        """
+        """Abort before writing results if too many judge verdicts were unparsable."""
         summary = self.stats_summary()
         broken = []
         for name, stats in summary.items():
@@ -330,8 +312,8 @@ class Judge:
                 "verdicts.\n  " + "\n  ".join(broken) +
                 f"\n  model_id={summary.get('model_id')}\n"
                 "  A reasoning judge needs room for its verdict -- retry with "
-                "--set judge.reasoning_effort=low --set judge.max_tokens=256 "
-                "(gpt-oss-20b), or raise max_tokens.")
+                "--set judge.reasoning_effort=low --set judge.max_tokens=256, "
+                "or raise max_tokens.")
 
     def stats_summary(self) -> dict:
         def block(stats):
@@ -358,14 +340,9 @@ class Judge:
 
 
 def make_judge(cfg, chat_end_markers: Sequence[str] = ()):
-    # Correctness is always the LLM judge, as every reported number is. The one switch
-    # replaces rollout-vs-rollout equivalence with token F1 -- Table 8's CSR-F1:
-    #     --set judge.equivalence=f1 --set judge.f1_threshold=0.5
+    # correctness is always the LLM judge; judge.equivalence=f1 swaps rollout-vs-rollout
+    # equivalence for token F1 (CSR-F1)
     judge_cfg = cfg["judge"] if "judge" in cfg else cfg
-    if "backend" in judge_cfg:
-        # --set creates unknown keys silently, so a stale judge.backend would be ignored
-        raise ValueError("judge.backend was removed; correctness is always the LLM judge. "
-                         "Use --set judge.equivalence=f1 for the CSR-F1 configuration.")
     judge = Judge(cfg, chat_end_markers=chat_end_markers)
     equivalence = str(judge_cfg.get("equivalence", "llm")).lower()
     if equivalence in ("f1", "token_f1"):

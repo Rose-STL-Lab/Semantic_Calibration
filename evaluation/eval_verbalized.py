@@ -6,7 +6,7 @@ output (RD: ``Answer: …, Confidence: <0-10>``; RLCR: ``<confidence>…</confid
 and correctness comes from the same LLM judge the answer-only methods use.
 
     python evaluation/eval_verbalized.py --method RD --model qwen --dataset trivia \
-        --ckpt ckpt/RD_qwen/model_finetuned_step_2500   # omit --ckpt for the frozen base
+        --ckpt ckpt/RD/<exp-name>/model_finetuned_step_1250   # omit --ckpt for the frozen base
 """
 
 from __future__ import annotations
@@ -28,15 +28,14 @@ def parse_args():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     add_common_args(parser)
     parser.add_argument("--ckpt", default=None,
-                        help="checkpoint dir (LoRA adapter or merged model). "
+                        help="checkpoint dir (LoRA adapter). "
                              "Omit to evaluate the frozen base model.")
     parser.add_argument("--fresh", action="store_true",
                         help="ignore any existing results.json and start over")
     return parser.parse_args()
 
 
-# mean over the records that carry `key`: records seeded from a training-time
-# validation pass have no token accounting, so a plain sum() would raise on None
+# mean over the records that carry `key`
 def _avg(records, key):
     values = [r[key] for r in records if r.get(key) is not None]
     return float(sum(values) / len(values)) if values else float("nan")
@@ -74,7 +73,7 @@ def main():
     dataset = load_split(cfg, split="eval")
 
     for checkpoint in checkpoints:
-        # RD ckpts are merged models, not adapters -> reload per checkpoint
+        # reloaded per checkpoint; the LoRA adapter comes back as lora_request
         model, tokenizer, lora_request = load_for_eval(
             cfg, int(eval_cfg["max_seq_length"]), checkpoint=checkpoint)
 

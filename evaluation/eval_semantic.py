@@ -45,8 +45,7 @@ def parse_args():
     return parser.parse_args()
 
 
-# mean over the records that carry `key`: records seeded from a training-time
-# validation pass have no token accounting, so a plain sum() would raise on None
+# mean over the records that carry `key`
 def _avg(records, key):
     values = [r[key] for r in records if r.get(key) is not None]
     return float(sum(values) / len(values)) if values else float("nan")

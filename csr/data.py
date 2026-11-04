@@ -36,8 +36,7 @@ def _hotpot(example, system_prompt, user_template):
 
 
 def _format_hotpot_context(example) -> str:
-    # "Title: <t>\n<sentences>" blocks -- byte-identical to the original context
-    # runs, so reused RLVR/RD/RLCR checkpoints see their training prompt
+    # "Title: <t>\n<sentences>" blocks, the layout the context checkpoints train on
     ctx = example.get("context", {}) or {}
     parts = []
     for title, sentences in zip(ctx.get("title", []) or [], ctx.get("sentences", []) or []):
@@ -57,9 +56,7 @@ _RLCR_REMINDER = (
 
 
 def _rlcr_passages(bodies) -> str:
-    # the passages in RLCR's own layout: numbered "Paragraph <i>" blocks, no titles,
-    # separator rules between them -- byte-identical to _build_hotpot_problem in
-    # RLCR/hotpot_context/rlcr_unsloth_hotpot_aligned_10k_1epoch_*.py
+    # RLCR's passage layout: numbered "Paragraph <i>" blocks, no titles, separator rules
     sections = []
     for idx, body in enumerate(bodies):
         sections.append(f"Paragraph {idx} \n\n {body} \n\n")
@@ -202,8 +199,7 @@ def _musique(example, system_prompt, user_template, method: str = "CSR"):
         "answer": [g for g in gold if g.strip()],
         "meta": {
             "id": example.get("id", ""),
-            # always True in dgslibisey/MuSiQue; the unanswerable twins live in
-            # the Full release (bdsaglam/musique), which this config does not use
+            # always True in the answerable-only release used here
             "answerable": example.get("answerable"),
             "hops": str(example.get("id", "")).split("hop")[0],
         },
@@ -230,9 +226,7 @@ def _msmarco_context(example, system_prompt, user_template, method: str = "CSR")
 
 
 def _twowiki(example, system_prompt, user_template, method: str = "CSR"):
-    # 2WikiMultihopQA ships HotpotQA's layout with `content` where hotpot has
-    # `sentences`; the mirror's extra `questions` fields are a GPT-3.5 augmentation
-    # and are ignored.
+    # HotpotQA's layout with `content` in place of `sentences`
     question = example["question"]
     ctx = example.get("context", {}) or {}
     blocks, bodies = [], []
@@ -329,9 +323,7 @@ def load_split(cfg, split: str = "eval", size: int | None = None):
     if name in REQUIRES_NONEMPTY_GOLD:
         dataset = dataset.filter(lambda ex: isinstance(ex["answer"], list) and len(ex["answer"]) > 0)
 
-    # 2WikiMultihopQA's comparison and bridge_comparison questions are answerable
-    # without the passages: the gold is yes/no or one of the two entities already
-    # named in the question. keep_types drops them.
+    # comparison-type 2Wiki questions are answerable without the passages; keep_types drops them
     keep = ds_cfg.get("keep_types")
     if keep:
         keep = set(keep)
@@ -341,8 +333,7 @@ def load_split(cfg, split: str = "eval", size: int | None = None):
 
     dataset = dataset.shuffle(seed=int(cfg.get("seed", 42)))
 
-    # SimpleQA ships one split, so _resolve_split would hand train and eval the
-    # same rows. Carve them disjointly: eval takes the head, train the tail.
+    # single-split datasets: eval takes the head, train the tail, so they stay disjoint
     if ds_cfg.get("single_split"):
         head = int(ds_cfg["eval_size"])
         if split == "train":

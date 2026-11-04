@@ -2,8 +2,6 @@ import torch
 
 def remove_padding(tensor, pad_token):
     start_idx = 0
-    # while start_idx < len(tensor) and tensor[start_idx] == pad_token:
-    #     start_idx += 1
 
     # Find the end index where padding starts again
     end_idx = len(tensor) - 1

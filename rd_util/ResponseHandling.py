@@ -29,28 +29,18 @@ def dict_to_QAResult(result: dict) -> QAResult:
     return dict_to_class(QAResult, result)
 
 def parse_answer_confidence(output, is_multiple_choice, strict=False):
-    """
-    Looks for answer and confidence values with regex. \n
-    pattern = r"Answer:\s*(?P<answer>.*?)\s*Confidence:\s*(?P<confidence>\d+)"
+    """Parse "Answer: <answer>, Confidence: <value>" (comma or newline separated).
 
     Returns:
-        Tuple[str, int]: answer, confidence
-        is None, None if pattern not found
+        Tuple[str, float]: answer, confidence on the 0-10 scale
+        (None, None) if the format is not matched
     """
     text = str(output or "").strip()
     text = re.sub(r"(?:</s>\s*)+$", "", text).strip()
     text = re.sub(r"(?:<\|im_end\|>\s*)+$", "", text).strip()
 
-    # Main path: support both comma and newline between Answer / Confidence.
-    # Confidence stays on the 0-10 scale the prompt asks for, but a decimal <= 1 is
-    # accepted and mapped onto it, because that is the model answering on a 0-1
-    # probability scale instead. RD training induces exactly that: base Mistral emits
-    # 99/100 integers (almost always "10"), while the step-2500 checkpoint collapses
-    # onto a 0/1 verdict and writes 22/100 of them as floats. The integer-only regex
-    # this replaces read "0.9" as 0, and reward_function hands a conf-0 report the top
-    # reward on every question the model gets wrong -- at Mistral's 29% accuracy that
-    # misread paid for the collapse on 71% of the data. Mapping into 0-10 here leaves
-    # reward_function, the ECE/AUROC helpers and the wrong-format penalty untouched.
+    # A decimal in [0, 1] is read as a probability and mapped onto the 0-10 scale;
+    # upstream's integer regex reads "0.9" as 0, which the reward pays for wrong answers.
     conf_re = r"-?\d+(?:\.\d+)?"
     main_pattern = re.compile(
         rf"Answer\s*:\s*(?P<answer>.*?)\s*(?:,|\n|\r\n)\s*Confidence\s*:\s*(?P<confidence>{conf_re})\b",
@@ -64,10 +54,8 @@ def parse_answer_confidence(output, is_multiple_choice, strict=False):
             return value * 10.0
         return value
 
-    # Fallback path: if formatting is noisy, extract fields independently.
-    # strict skips it, as upstream's single regex does: the fallback reads
-    # "Answer: Confidence: 0" as the answer "Confidence: 0", and an abstention
-    # with confidence 0 is the highest-paid wrong answer.
+    # Fallback: extract the fields independently. strict skips it, as upstream does,
+    # since it reads "Answer: Confidence: 0" as the answer "Confidence: 0".
     if not match:
         if strict:
             return None, None
@@ -81,10 +69,7 @@ def parse_answer_confidence(output, is_multiple_choice, strict=False):
         answer = match.group("answer").strip()
         token = match.group("confidence")
         if strict and "." in token:
-            # the prompt asks for an integer 0-10: "5.0" is the integer 5, but "5.1"
-            # or "0.9" is a format failure (-30) like any other departure from the
-            # requested format, not an integer prefix (upstream reads "0.9" as 0) and
-            # not a value on another scale
+            # the prompt asks for an integer: "5.0" is 5, "5.1" or "0.9" a format failure
             value = float(token)
             if not value.is_integer():
                 return None, None

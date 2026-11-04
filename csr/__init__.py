@@ -1,6 +1,5 @@
-# CSR -- Calibration via Semantic Reward.
-# config/parsing/metrics/semantic/results are pure Python + numpy;
-# modeling/generation need torch + unsloth.
+# CSR: Calibrating LLMs with Semantic-level Reward.
+# modeling/generation need torch + unsloth; the rest runs without a GPU.
 
 from .config import (  # noqa: F401
     add_common_args,

@@ -17,9 +17,8 @@ model:
   use_exact_model_name: true
 
   load_in_4bit: true
-  # vLLM's share of the card; 0.7 OOMs an 8-completion backward pass, 0.5 does not.
-  # Do NOT shrink the backward micro-batch below num_generations instead: half a
-  # prompt group trains with grad_norm=NaN and loss=0.
+  # vLLM's share of the card; 0.7 OOMs the 8-completion backward pass. Do not
+  # shrink the micro-batch below num_generations instead (grad_norm becomes NaN).
   gpu_memory_utilization: 0.5
 
   lora:

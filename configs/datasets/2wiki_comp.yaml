@@ -5,16 +5,13 @@ dataset:
   # Restricted to a single reasoning type; see keep_types below.
   hf:
     path: scholarly-shadows-syndicate/2wikimultihopqa_with_q_gpt35
-  # evaluation only: 95.3% of the eval questions' templates also occur in the train
-  # split, so training on it would not be out of distribution.
+  # evaluation only: most eval question templates also occur in the train split
   train_split: validation
   eval_split: validation
   eval_size: 1000
   correctness_prompt: judge
 
-  # comparison and bridge_comparison are 100% answerable from the question alone
-  # (gold is yes/no, or one of the two entities the question names). This slice is
-  # the compositional half alone: 5236 two-hop bridge questions, 1000 sampled.
+  # compositional (two-hop bridge) questions only
   keep_types: [compositional]
 
   system_prompt:

@@ -14,12 +14,10 @@ torchmetrics==1.6.1         # rd_util/EvaluationMetrics.py
 dacite==1.8.1               # rd_util/ResponseHandling.py
 
 numpy==2.2.6
-scipy==1.15.1               # rd_util/RLHelper.py
+scipy==1.15.1               # rd_util/EvaluationMetrics.py
 scikit-learn==1.6.1         # rd_util/EvaluationMetrics.py
 tqdm==4.67.3
 PyYAML==6.0.3               # train_RD.py reads the layered config through csr.config
 
-# Optional: only the MATH_VERIFY metric needs it, and rd_util/EvaluationMetrics.py
-# imports it inside a try that returns 0.0 on failure -- so a missing install
-# scores every answer wrong instead of raising.
+# Optional, for the MATH_VERIFY metric; if missing, that metric silently scores 0.
 # math-verify==0.9.0

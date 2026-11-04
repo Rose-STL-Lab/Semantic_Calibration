@@ -1,8 +1,8 @@
-"""Table 6: two post-hoc estimators (SemDens, bayes-beta) recomputed from the stored runs.
+"""SemDens and bayes-beta post-hoc estimators, recomputed from the stored runs.
 
     python analysis/estimators.py                 # markdown, K=16
     python analysis/estimators.py --k 8           # first 8 rollouts
-    python analysis/estimators.py --latex         # Table 6 body
+    python analysis/estimators.py --latex         # LaTeX table body
 """
 
 from __future__ import annotations
@@ -72,8 +72,8 @@ def load_run(exp: str, k: int) -> list[dict]:
 def semantic_density(records: list[dict]) -> np.ndarray:
     # deviates from Qiu et al.: kernel is the 0/1 same-cluster indicator, not
     # DeBERTa-MNLI 1-(p_contra + 0.5 p_neutral); references are the K temperature
-    # rollouts, not diverse beam search (Appendix D.1). No log-prob file -> uniform
-    # weights, i.e. the unweighted variant; the published table is weighted.
+    # rollouts, not diverse beam search. Without a log-prob file the weights are
+    # uniform (the unweighted variant).
     out = []
     for rec in records:
         ids = rec["cluster"]
@@ -135,7 +135,7 @@ def bayes_beta(records: list[dict]) -> np.ndarray:
     return per_question / np.maximum(counts, 1.0)
 
 
-LOGPROBS_NAME = "logprobs_hf.json"   # the transformers scorer; see aggregation
+LOGPROBS_NAME = "logprobs_hf.json"   # written by analysis/logprobs_hf.py
 
 
 def attach_logprobs(exp: str, records: list[dict], k: int) -> bool:
@@ -207,7 +207,7 @@ def print_markdown(table: dict, k: int) -> None:
 
 
 def print_latex(table: dict, k: int) -> None:
-    print(f"% Table 6 body, K={k}")
+    print(f"% table body, K={k}")
     for name in ESTIMATORS:
         print(f"% ---- {name} ----")
         for model in MODELS:

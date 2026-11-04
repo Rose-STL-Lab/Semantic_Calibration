@@ -13,7 +13,7 @@ judge:
   max_tokens: 16             # the prompts answer with one word
   max_retries: 2
   sleep_sec: 1.5
-  # the SDK default (600 s) lets one stalled socket hold a whole batch
+  # the SDK default (600 s) lets one stalled request hold up a batch
   request_timeout_sec: 20
   client_max_retries: 1
   # null = the hosted OpenAI endpoint. For a local server instead, e.g.
@@ -29,8 +29,7 @@ judge:
 
   system_prompt: "You are a helpful assistant that helps people find information."
 
-  # One prompt for both roles: rollout-vs-rollout equivalence, and HotpotQA
-  # correctness.
+  # used for both rollout-vs-rollout equivalence and HotpotQA correctness
   judge_prompt: |-
     Given a question and two potential answers, you need to analyze whether the two answers convey the same meaning. Respond with "yes" or "no".
     Your response should be completely based on the similarity between the two answers.
@@ -62,7 +61,6 @@ judge:
 
     Your response should use the following format:
     Correct: <yes or no>
-
 
   multi_gold_prompt: |-
     Given a question, one generated answer, and a list of candidate correct answers, you need to analyze whether the generated answer matches any candidate correct answer. Respond with "yes" or "no".

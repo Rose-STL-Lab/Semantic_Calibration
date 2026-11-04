@@ -1,8 +1,6 @@
-"""Answer log-probabilities without vLLM, for the backbones vLLM cannot score.
+"""Scores answers with a plain transformers forward pass.
 
-A plain transformers forward pass, not vLLM: vLLM 0.11.2's ``prompt_logprobs``
-path crashes for Llama-3.1-8B and Mistral-7B under LoRA. Writes
-``logprobs_hf.json``, which aggregation.py and estimators.py read.
+Writes ``logprobs_hf.json`` per run, which aggregation.py and estimators.py read.
 
     python analysis/logprobs_hf.py --model llama --method Base \
         --datasets hotpot trivia msmarco nq_open
@@ -17,6 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from csr.config import MODELS  # noqa: E402
 
 RESULTS = ROOT / "results"
 CKPT = {
@@ -29,8 +28,6 @@ EXP = {
     "RLVR": "RLVR_{m}_{d}_step2500_nano_k16",
     "CSR": "CSR_{m}_{d}_z10_step2500_nano_k16",
 }
-# --model takes the config key; results/ and ckpt/ use the yaml's ckpt_name
-from csr.config import MODELS
 
 
 def load_hf_policy(cfg, adapter: str | None, load_in_4bit: bool):
@@ -118,8 +115,7 @@ def main() -> None:
 
     model = tokenizer = None
     for ds in args.datasets:
-        cfg = load_config(args.method if args.method != "Base" else "Base",
-                          args.model, ds, [])
+        cfg = load_config(args.method, args.model, ds, [])
         name = cfg["model"]["ckpt_name"]          # results/ and ckpt/ directory name
         exp = EXP[args.method].format(m=name, d=ds)
         run_dir = RESULTS / exp

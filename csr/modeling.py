@@ -79,13 +79,10 @@ def load_for_eval(cfg, max_seq_length: int, checkpoint: str | None = None):
         max_lora_rank=int(lora["rank"]),
         use_exact_model_name=bool(model_cfg.get("use_exact_model_name", True)),
         gpu_memory_utilization=float(model_cfg.get("gpu_memory_utilization", 0.7)),
-        # keeps the embedding table in RAM
+        # embedding table to RAM
         offload_embedding=bool(model_cfg.get("offload_embedding", False)),
-        # unsloth's default is "sequential", which spills to CPU the moment it
-        # thinks the model will not fit -- and bitsandbytes then refuses the
-        # CPU-dispatched modules outright. {"": 0} pins everything to the single
-        # visible device, so a model that really is too large fails as a plain
-        # OOM instead of as a quantizer complaint.
+        # e.g. {"": 0}: unsloth's "sequential" default can spill to CPU, which
+        # bitsandbytes rejects
         **({"device_map": model_cfg["device_map"]} if model_cfg.get("device_map") else {}),
     )
     tokenizer = _prepare_tokenizer(tokenizer)
@@ -106,6 +103,7 @@ def load_for_eval(cfg, max_seq_length: int, checkpoint: str | None = None):
 
     model = model.eval()
     return model, tokenizer, lora_request
+
 
 # these live in results.py so the judge-only phase can reach them without unsloth
 from .results import checkpoint_step, resolve_checkpoints  # noqa: E402,F401

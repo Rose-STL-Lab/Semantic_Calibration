@@ -129,8 +129,7 @@ class PeriodicEvalCallback(TrainerCallback):
             print(f"[validation] step {step} skipped: {type(exc).__name__}: {exc}")
 
     def _evaluate(self, args, state, model, step: int) -> None:
-        # always the live weights: on_step_end runs before the Trainer saves this
-        # step, so an existing checkpoint-<step> would be left over from an earlier run
+        # save the live weights: on_step_end runs before the Trainer saves this step
         adapter = os.path.join(self.run_dir, f"_eval_adapter_step_{step}")
         try:
             model.save_pretrained(adapter)
@@ -138,8 +137,6 @@ class PeriodicEvalCallback(TrainerCallback):
             started = time.time()
             confidences, accuracies, records = self._collect(model, lora_request)
         finally:
-            # a full adapter copy per pass (1.1 GB at 32B); the step's checkpoint, if
-            # save_steps lands on it, is written by the Trainer right after this
             shutil.rmtree(adapter, ignore_errors=True)
         saved = os.path.join(args.output_dir, f"checkpoint-{step}")
         on_save_step = bool(args.save_steps) and step % int(args.save_steps) == 0

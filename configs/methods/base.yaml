@@ -9,5 +9,5 @@ method:
     max_new_tokens: 256
     max_seq_length: 1024
     ece_bins: 10
-    # Clustering asks one symmetric equivalence question per unordered pair
-    # (K(K-1)/2 = 28 calls at K=8) -- the same protocol CSR trains against.
+    # clustering: one symmetric equivalence call per unordered pair (120 at K=16),
+    # the same protocol CSR trains against

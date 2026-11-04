@@ -16,7 +16,7 @@ dataset:
     default: |-
       Provide a concise and direct answer to the question. Use the provided context and reason step-by-step. End with 'Final answer: <answer>'.
 
-# measured: 913 tokens median, 1465 max
+# prompts run to ~1.5k tokens
 model:
   gpu_memory_utilization: 0.35
 

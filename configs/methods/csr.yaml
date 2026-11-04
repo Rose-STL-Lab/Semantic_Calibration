@@ -12,10 +12,8 @@ method:
     cali_w_start: 0.8              # calibration weight, ramped 0.8 -> 1.2
     cali_w_end: 1.2
     cali_w_schedule: sigmoid       # linear | sigmoid (equal endpoints = constant)
-    # Both rewards are on [0, 1], so the two weights are directly comparable.
-    # A constant weight above ~1.4 fragments the policy; above ~2.7 it collapses
-    # onto one answer, which is why the ramp above stays well inside that range.
-    # TRL's scale_rewards='group' is relied on and deliberately left unset.
+    # Both rewards are on [0, 1]. Much larger calibration weights fragment the
+    # policy or collapse it onto one answer. TRL's default scale_rewards='group' applies.
     max_seq_length: 1024
     max_prompt_length: 256
     learning_rate: 5.0e-6
@@ -27,9 +25,8 @@ method:
     warmup_ratio: 0.1
     lr_scheduler_type: cosine
     optim: paged_adamw_8bit
-    # TRL >= 0.24 counts completions here, not prompts, and the generation
-    # batch must hold whole prompt groups: 8 * 4 = 32 completions, i.e. 4
-    # prompts per optimizer step, so one epoch over 10k prompts is 2500 steps.
+    # TRL counts completions, not prompts: 8 x 4 = 32 completions = 4 prompts/step,
+    # so one epoch over 10k prompts is 2500 steps
     per_device_train_batch_size: 8
     gradient_accumulation_steps: 4
     num_generations: 8
@@ -40,14 +37,9 @@ method:
     save_steps: 250
     max_grad_norm: 0.1
     logging_steps: 1
-    # Mid-training validation on the eval split, at the same K as the final
-    # eval below so the two are directly comparable. Each pass costs
-    # eval_size x (K + K(K-1)/2) judge calls -- 136k at K=16 -- so it is not
-    # cheap; set eval_every_steps to 0 to turn it off, or pass
-    # --set method.train.eval_num_rollouts=8 (36k calls) when the validation
-    # rows are only being read for their trend. Checkpoints are saved every
-    # save_steps either way and can be scored afterwards with
-    # evaluation/eval_semantic.py.
+    # Mid-training validation on the eval split, at the same K as the final eval.
+    # Each pass costs eval_size x (K + K(K-1)/2) judge calls; lower eval_num_rollouts
+    # to make it cheaper.
     eval_every_steps: 250          # 0.1 epoch (2500 steps); 0, or more steps than the run, turns it off
     eval_num_rollouts: 16
     eval_max_new_tokens: 256
@@ -62,5 +54,5 @@ method:
     max_new_tokens: 256
     max_seq_length: 1024
     ece_bins: 10
-    # Clustering asks one symmetric equivalence question per unordered pair
-    # (K(K-1)/2 = 28 calls at K=8) -- the same protocol CSR trains against.
+    # clustering: one symmetric equivalence call per unordered pair (120 at K=16),
+    # the same protocol CSR trains against

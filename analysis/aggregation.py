@@ -1,4 +1,4 @@
-"""Table 7: two SIMBA-UQ aggregation rules (arithmetic, clf-pairs+gen) over the stored rollouts.
+"""Two SIMBA-UQ aggregation rules (arithmetic, clf-pairs+gen) over the stored rollouts.
 
     python analysis/aggregation.py [--k 16] [--latex]
 """
@@ -50,8 +50,8 @@ def arithmetic(records: list[dict]) -> np.ndarray:
     return np.asarray(out)
 
 
-# departs from SIMBA-UQ: sorted sims, full-depth forest, question-grouped 5-fold,
-# not depth 4 + one random 50/50 split (Appendix app:alt_estimators)
+# departs from SIMBA-UQ: sorted sims, min_samples_leaf=5 forest, question-grouped
+# 5-fold, not depth 4 + one random 50/50 split
 def clf_pairs_gen(records: list[dict]) -> np.ndarray:
     # out-of-fold random-forest posterior, averaged per question
     feats, labels, groups = [], [], []
@@ -90,14 +90,13 @@ def clf_pairs_gen(records: list[dict]) -> np.ndarray:
 RULES = {"arithmetic": arithmetic, "clf-pairs+gen": clf_pairs_gen}
 
 
-NO_LOGPROBS = False          # set by --no-logprobs; see attach_logprobs
-# analysis/logprobs_hf.py is what reproduces Table 7
+NO_LOGPROBS = False          # set by --no-logprobs
 LOGPROBS_NAME = "logprobs_hf.json"
 
 
 def attach_logprobs(exp: str, records: list[dict], k: int) -> bool:
     # the "+gen" log-prob feature, from the run's LOGPROBS_NAME file if present
-    if NO_LOGPROBS:          # similarities only, so every backbone is scored alike
+    if NO_LOGPROBS:
         return False
     path = RESULTS / exp / LOGPROBS_NAME
     if not path.exists():

@@ -61,8 +61,7 @@ class RunDir:
         rows = list(payload.get("records", []))
         if limit is not None:
             rows = rows[:limit]
-        # a copy: eval_semantic.py appends to what it gets back and also calls
-        # append_records(), so aliasing would double-count every resumed question
+        # a copy, since callers also append_records() the rows they get back
         self._records = list(rows)
         return rows
 

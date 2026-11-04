@@ -11,9 +11,7 @@ from typing import Sequence
 
 from .parsing import canonicalize_answer
 
-# TriviaQA official eval code, as vendored by RD in rd_util/EvaluationMetrics.py.
-# Verbatim, and not csr.parsing.normalize_answer (different step order), so this judge
-# and RD's training loop tokenize identically.
+# TriviaQA official normalizer (as used by RD), kept verbatim so tokenization matches RD.
 # https://github.com/mandarjoshi90/triviaqa/blob/master/evaluation/triviaqa_evaluation.py
 def normalize_answer(s: str) -> str:
     def remove_articles(text):
@@ -68,9 +66,8 @@ def new_stats() -> dict:
 
 
 class F1EquivalenceJudge:
-    # LLM judge for correctness, token F1 for rollout-rollout equivalence (CSR-F1).
-    # Note >=, as in the original CSR-F1 scripts (RD's exact match uses >).
-    # Everything but symmetric_batched forwards to the LLM judge.
+    # token F1 >= threshold for rollout-rollout equivalence (CSR-F1);
+    # everything but symmetric_batched forwards to the LLM judge
 
     def __init__(self, llm_judge, cfg, chat_end_markers: Sequence[str] = ()):
         judge_cfg = cfg["judge"] if "judge" in cfg else cfg

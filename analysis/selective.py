@@ -1,6 +1,6 @@
-"""Tables 5 and 12, recomputed from this repo's evaluation runs.
+"""Selective prediction (AURAC / AUGRC) and verbalized-confidence parse rates.
 
-Re-summarises records that already exist -- no GPU, no judge.
+Recomputed from existing evaluation records; needs no GPU or judge.
 
     python analysis/selective.py --table 5|12|all [--latex]
 """
@@ -37,7 +37,7 @@ def conf_acc(exp: str) -> tuple[np.ndarray, np.ndarray]:
 
 
 def selective(conf: np.ndarray, acc: np.ndarray) -> tuple[float, float]:
-    # label is 1[acc >= 0.5], not the rollout fraction the rest of analysis/ uses
+    # a question counts as correct when acc >= 0.5
     label = (acc >= 0.5).astype(float)
     n = len(label)
     counts = np.arange(1, n + 1)
@@ -66,7 +66,7 @@ def selective(conf: np.ndarray, acc: np.ndarray) -> tuple[float, float]:
 
 
 def table5(latex: bool) -> None:
-    # Table 5: accepted in decreasing order of the method's own confidence
+    # accepted in decreasing order of the method's own confidence
     for model in MODELS:
         rows = {}
         for method, pattern in RUN_TEMPLATES.items():
@@ -90,7 +90,6 @@ def table5(latex: bool) -> None:
             for c in cols:
                 r, g = rows[method][c]
                 if latex:
-                    # AURAC and AUGRC get their own columns
                     sr = f"\\textbf{{{r:.4f}}}" if abs(r - best_r[c]) < 1e-12 else f"{r:.4f}"
                     sg = f"\\textbf{{{g:.4f}}}" if abs(g - best_g[c]) < 1e-12 else f"{g:.4f}"
                     out.extend((sr, sg))
@@ -105,7 +104,7 @@ def table5(latex: bool) -> None:
 
 
 def table12(latex: bool) -> None:
-    # Table 12: fraction whose verbalized confidence parsed and was in range
+    # fraction whose verbalized confidence parsed and was in range
     for model in MODELS:
         if latex:
             print(f"\\multirow{{5}}{{*}}{{{MODEL_LABELS[model]}}}")

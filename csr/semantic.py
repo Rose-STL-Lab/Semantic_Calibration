@@ -1,7 +1,6 @@
 # Semantic clustering and the confidence proxy for Base / RLVR / CSR.
-# One symmetric judgment per unordered pair (28 at K=8, the protocol CSR's
-# calibration reward uses in training), then SE = -sum p log p over the clusters
-# and c = exp(-SE) in (0, 1]. The model generates no confidence token.
+# One symmetric judgment per unordered pair (as in CSR's training reward), then
+# SE = -sum p log p over the clusters and c = exp(-SE) in (0, 1].
 
 from __future__ import annotations
 
@@ -12,8 +11,7 @@ import numpy as np
 
 
 def semantic_cluster_ids(samples: Sequence[str], question: str, judge) -> list[int]:
-    # one symmetric judgment per unordered pair; an unparsable verdict counts as
-    # not-equivalent -- conservative, it can only lower the reported confidence
+    # an unparsable verdict counts as not-equivalent
     n = len(samples)
     if n <= 1:
         return list(range(n))
@@ -54,9 +52,7 @@ def _assign_clusters(n: int, pair_index: dict, verdicts, dropped) -> list[int]:
 
 
 def cluster_entropy(cluster_ids: Sequence[int]) -> float:
-    # natural log. fsum, not .sum(): ids are numbered in rollout order, so a plain
-    # sum makes the entropy order-dependent to 1 ulp and two questions with the
-    # same cluster sizes then fail to tie in AUROC and AURAC
+    # natural log; fsum keeps equal cluster sizes tied exactly regardless of rollout order
     n = len(cluster_ids)
     if n <= 1:
         return 0.0
@@ -90,8 +86,7 @@ def semantic_confidence(samples: Sequence[str], question: str, judge) -> dict:
 
 def semantic_confidence_batch(samples_list: Sequence[Sequence[str]], questions: Sequence[str],
                               judge) -> list[dict]:
-    # every pair of every question in one symmetric_batched call, then the same
-    # _assign_clusters
+    # every pair of every question in one symmetric_batched call
     out: list[dict | None] = [None] * len(samples_list)
     a_list: list[str] = []
     b_list: list[str] = []
