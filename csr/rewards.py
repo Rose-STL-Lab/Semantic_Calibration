@@ -145,7 +145,7 @@ class RewardComputer:
                         pair_idx.append((j, i))
 
                 same, _unparsed, missing = self.judge.symmetric_batched(
-                    a_list, b_list, [question] * len(a_list))
+                    a_list, b_list, [q_text] * len(a_list))
                 dropped = set(missing)
 
                 # one verdict per pair, credited to both endpoints against each one's own q
