@@ -299,5 +299,5 @@ def load_split(cfg, split: str = "eval", size: int | None = None):
 
 
 def correctness_prompt_kind(cfg) -> str:
-    # judge: reuse the equivalence prompt. gold: single/multi correctness by gold count
+    # judge: reuse the equivalence prompt. gold: same, but multi-gold when several golds
     return cfg["dataset"].get("correctness_prompt", "judge")

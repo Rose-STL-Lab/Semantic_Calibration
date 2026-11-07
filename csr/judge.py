@@ -87,8 +87,7 @@ class Judge:
 
         # rollout-vs-rollout equivalence, and correctness where the dataset asks for it
         self.prompt = judge_cfg["judge_prompt"]
-        # directional correctness prompts (A judged, B reference), chosen by gold count
-        self.single_gold_prompt = judge_cfg["single_gold_prompt"]
+        # directional correctness prompt (A judged, B reference) for several golds
         self.multi_gold_prompt = judge_cfg["multi_gold_prompt"]
 
         self.chat_end_markers = list(chat_end_markers or ())
@@ -272,12 +271,10 @@ class Judge:
                                    stats=self.correctness_stats, template=template)
 
     def _gold_template(self, gold, kind: str):
-        # "judge": the equivalence prompt (None); "gold": single/multi by gold count
-        if kind == "judge":
-            return None
-        if isinstance(gold, (list, tuple)) and len(gold) > 1:
+        # the equivalence prompt (None), except multi-gold for "gold" with several golds
+        if kind == "gold" and isinstance(gold, (list, tuple)) and len(gold) > 1:
             return self.multi_gold_prompt
-        return self.single_gold_prompt
+        return None
 
     def score_against_gold(self, preds: Sequence[str], gold, question: str,
                            kind: str = "judge") -> list[int]:

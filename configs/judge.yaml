@@ -30,7 +30,8 @@ judge:
 
   system_prompt: "You are a helpful assistant that helps people find information."
 
-  # rollout-vs-rollout equivalence, and correctness on datasets with correctness_prompt: judge
+  # rollout-vs-rollout equivalence, and correctness against a single gold answer
+  # (every question of correctness_prompt: judge datasets)
   judge_prompt: |-
     Given a question and two potential answers, you need to analyze whether the two answers convey the same meaning. Respond with "yes" or "no".
     Your response should be completely based on the similarity between the two answers.
@@ -46,24 +47,9 @@ judge:
     Your response should use the following format:
     Correct: <yes or no>
 
-  # Correctness on datasets with correctness_prompt: gold (TriviaQA, NQ-Open, MSMARCO),
-  # single or multi by gold count; the others use judge_prompt. Directional: {a} is
-  # the candidate, {b} the reference.
-  single_gold_prompt: |-
-    Given a question, one generated answer, and the gold correct answer, determine whether the generated answer matches the gold answer in meaning. Respond with "yes" or "no".
-    Your response should be completely based on the similarity between the generated answer and the gold correct answer.
-    DO NOT use your own knowledge base when do the comparison.
-
-    Question:
-    {q}
-    Generated Answer:
-    {a}
-    Gold Correct Answer:
-    {b}
-
-    Your response should use the following format:
-    Correct: <yes or no>
-
+  # Correctness on datasets with correctness_prompt: gold (TriviaQA, NQ-Open, MSMARCO)
+  # when the question has several gold answers; one gold uses judge_prompt. Directional:
+  # {a} is the candidate, {b} the reference answers joined by "; ".
   multi_gold_prompt: |-
     Given a question, one generated answer, and a list of candidate correct answers, you need to analyze whether the generated answer matches any candidate correct answer. Respond with "yes" or "no".
     Your response should be completely based on the similarity between the generated answer and the candidate correct answers.
