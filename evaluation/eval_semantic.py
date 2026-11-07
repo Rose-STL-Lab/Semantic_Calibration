@@ -113,12 +113,25 @@ def main():
         records = run.load_records(limit=n)
         if records:
             print(f"[resume] {len(records)} questions already done in {run.records_path}")
+        if run.loaded_status != "final":
+            # verdicts a failing judge scored 0 must not survive into a resumed run
+            flagged = [r for r in records if r.get("judge_unparsed")]
+            for r in flagged:
+                for key in ("semantic_ids", "num_semantic_clusters", "semantic_entropy",
+                            "confidence", "accuracy", "judge_unparsed"):
+                    r.pop(key, None)
+                for rollout in r["rollouts"]:
+                    rollout.pop("semantic_id", None)
+                    rollout.pop("correct", None)
+            if flagged:
+                print(f"[resume] {len(flagged)} records had unparsable judge verdicts "
+                      f"and will be judged again")
         unjudged = sum(1 for r in records if "confidence" not in r)
         if unjudged and args.phase == "both":
             raise SystemExit(
-                f"{run.records_path} holds {unjudged} unjudged records from a "
-                f"--phase generate run; finish them with --phase judge (the "
-                f"alternating pass cannot resume into the middle of a split run)")
+                f"{run.records_path} holds {unjudged} unjudged records; finish them "
+                f"with --phase judge, then rerun to continue (the alternating pass "
+                f"cannot resume into the middle of a split run)")
         if not records and args.phase == "judge":
             raise SystemExit(f"{run.records_path} has no records to judge; "
                              f"run --phase generate first")
@@ -174,6 +187,7 @@ def main():
             return record
 
         def judge_block(recs):
+            unparsed_before = judge.unparsed_count()
             answers_list = [[r["extracted_answer"] for r in rec["rollouts"]] for rec in recs]
             questions_b = [rec["question"] for rec in recs]
             golds = [rec["gold_answers"][0] if len(rec["gold_answers"]) == 1
@@ -186,8 +200,10 @@ def main():
                 clusters_list = semantic_confidence_batch(answers_list, questions_b, judge)
                 labels_list = judge.score_against_gold_batch(
                     answers_list, golds, questions_b, prompt_kind)
+            unparsed = judge.unparsed_count() - unparsed_before
             for rec, clusters, labels in zip(recs, clusters_list, labels_list):
                 judge_record(rec, clusters, labels)
+                rec["judge_unparsed"] = unparsed   # per block; 0 when every verdict parsed
 
         if args.phase == "judge":
             # rollouts are on disk; only unjudged records need the judge

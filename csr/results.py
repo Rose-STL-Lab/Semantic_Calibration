@@ -30,6 +30,7 @@ class RunDir:
         self.records_path = self.results_path
         self._meta: dict = {}
         self._records: list[dict] = []
+        self.loaded_status: str | None = None
 
     def check_resume(self, checkpoint: str | None) -> None:
         # a run directory holds one checkpoint's records; resuming it with another
@@ -59,6 +60,7 @@ class RunDir:
                 payload = json.load(fh)
         except json.JSONDecodeError:
             return []  # interrupted mid-write; start over
+        self.loaded_status = payload.get("status")
         rows = list(payload.get("records", []))
         if limit is not None:
             rows = rows[:limit]

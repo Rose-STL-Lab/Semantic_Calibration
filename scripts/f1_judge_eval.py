@@ -124,6 +124,7 @@ def main() -> None:
                 [r["accuracy"] for r in records],
             )
             original_summary = source["summary"]
+            source_judge = original_summary["judge"].get("model_id", "unknown")
             summary.update(
                 {
                     "num_rollouts": 16,
@@ -135,7 +136,7 @@ def main() -> None:
                     "avg_prompt_tokens": original_summary.get("avg_prompt_tokens"),
                     "avg_total_tokens": original_summary.get("avg_total_tokens"),
                     "judge": {
-                        "model_id": "gpt-4.1-nano + f1-equivalence",
+                        "model_id": f"{source_judge} + f1-equivalence",
                         "correctness": original_summary["judge"]["correctness"],
                         "semantic_equivalence": {
                             "backend": "f1",
@@ -169,7 +170,7 @@ def main() -> None:
                 "f1_comparison": ">=",
                 "rollouts_regenerated": False,
                 "correctness_rejudged": False,
-                "correctness_judge": "gpt-4.1-nano",
+                "correctness_judge": source_judge,
             }
             derived["summary"] = summary
             derived["records"] = records

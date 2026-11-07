@@ -210,8 +210,8 @@ The scripts find runs through the name templates used above, such as
 `CSR_{model}_{dataset}_z10_step2500_nano_k16`, where `{model}` is a backbone tag
 (`llama8b`, `qwen7b`, `mistral7b`). The templates are defined in `analysis/runs.py`,
 `analysis/logprobs_hf.py` and `scripts/f1_judge_eval.py`; edit them if you name runs
-differently. A backbone with missing runs is skipped (`estimators.py`, `selective.py`)
-or reported (`aggregation.py`).
+differently. Missing or unfinished runs are shown as `--` (`estimators.py`), skip their
+backbone (`selective.py`), or stop the script with a list (`aggregation.py`).
 
 ## Citation
 

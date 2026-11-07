@@ -30,7 +30,7 @@ judge:
 
   system_prompt: "You are a helpful assistant that helps people find information."
 
-  # used for both rollout-vs-rollout equivalence and HotpotQA correctness
+  # rollout-vs-rollout equivalence, and correctness on datasets with correctness_prompt: judge
   judge_prompt: |-
     Given a question and two potential answers, you need to analyze whether the two answers convey the same meaning. Respond with "yes" or "no".
     Your response should be completely based on the similarity between the two answers.

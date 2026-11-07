@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 MODELS = ["llama8b", "qwen7b", "mistral7b"]
 
 # (directory name, display label)
@@ -32,7 +34,15 @@ SEMANTIC_METHODS = {"Base", "RLVR", "CSR"}
 SEMANTIC_TEMPLATES = {m: t for m, t in RUN_TEMPLATES.items() if m in SEMANTIC_METHODS}
 
 
+def is_final(path) -> bool:
+    # results.json written by a finished evaluation
+    try:
+        return json.loads(path.read_text()).get("status") == "final"
+    except (OSError, ValueError):
+        return False
+
+
 def missing_runs(results_dir, templates: dict, model: str) -> list[str]:
-    # run names among templates x DATASETS with no results.json under results_dir
+    # run names among templates x DATASETS without a finished results.json
     names = [t.format(model=model, dataset=ds) for t in templates.values() for ds, _ in DATASETS]
-    return [n for n in names if not (results_dir / n / "results.json").exists()]
+    return [n for n in names if not is_final(results_dir / n / "results.json")]

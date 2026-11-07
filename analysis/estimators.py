@@ -20,7 +20,7 @@ from sklearn.model_selection import GroupKFold
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from analysis.runs import DATASETS, MODELS, SEMANTIC_TEMPLATES  # noqa: E402
+from analysis.runs import DATASETS, MODELS, SEMANTIC_TEMPLATES, is_final  # noqa: E402
 
 from csr.metrics import expected_calibration_error      # noqa: E402
 
@@ -176,8 +176,8 @@ def collect(k: int) -> dict:
             per_ds = {}
             for ds, _ in DATASETS:
                 exp = pattern.format(model=model, dataset=ds)
-                if not (RESULTS / exp / "results.json").exists():
-                    print(f"[skip] missing run: {exp}", file=sys.stderr)
+                if not is_final(RESULTS / exp / "results.json"):
+                    print(f"[skip] missing or unfinished run: {exp}", file=sys.stderr)
                     continue
                 per_ds[ds] = score(exp, k)
                 print(f"[done] {exp:44} " + "  ".join(

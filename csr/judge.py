@@ -359,6 +359,10 @@ class Judge:
         self.same_stats = new_stats()
         self.correctness_stats = new_stats()
 
+    def unparsed_count(self) -> int:
+        # running total of unparsable verdicts, used to flag the records they hit
+        return int(self.same_stats["unparsed"]) + int(self.correctness_stats["unparsed"])
+
 
 def make_judge(cfg, chat_end_markers: Sequence[str] = ()):
     # correctness is always the LLM judge; judge.equivalence=f1 swaps rollout-vs-rollout

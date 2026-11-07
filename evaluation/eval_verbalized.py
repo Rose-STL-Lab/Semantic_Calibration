@@ -28,7 +28,7 @@ def parse_args():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     add_common_args(parser)
     parser.add_argument("--ckpt", default=None,
-                        help="checkpoint dir (LoRA adapter). "
+                        help="LoRA checkpoint dir, or a parent dir holding several. "
                              "Omit to evaluate the frozen base model.")
     parser.add_argument("--fresh", action="store_true",
                         help="ignore any existing results.json and start over")
@@ -92,6 +92,14 @@ def main():
         judge = make_judge(cfg, chat_end_markers=markers)
         n = len(dataset)
         records = run.load_records(limit=n)
+        if run.loaded_status != "final":
+            # resume before the first answer a failing judge scored 0, and redo it
+            bad = next((i for i, r in enumerate(records) if r.get("judge_unparsed")), None)
+            if bad is not None:
+                print(f"[resume] records from {bad} on are redone: the judge could not "
+                      f"score record {bad}")
+                records = records[:bad]
+                run.rewrite_records(records)
         if records:
             print(f"[resume] {len(records)} questions already done in {run.records_path}")
 
@@ -117,8 +125,10 @@ def main():
             )
 
             correct = 0
+            unparsed_before = judge.unparsed_count()
             if answer:
                 correct = int(judge.score_against_gold([answer], gold, question, prompt_kind)[0])
+            judge_unparsed = judge.unparsed_count() - unparsed_before
 
             prompt_tokens = count_tokens(tokenizer, prompt)
             completion_tokens = count_tokens(tokenizer, raw)
@@ -139,6 +149,7 @@ def main():
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "total_tokens": prompt_tokens + completion_tokens,
+                "judge_unparsed": judge_unparsed,
             })
             pending.append(records[-1])
 
