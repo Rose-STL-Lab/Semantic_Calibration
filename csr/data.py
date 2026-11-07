@@ -152,10 +152,14 @@ def _nq_open(example, system_prompt, user_template):
     }
 
 
-def _context_prompt(system_prompt, user_template, context: str, question: str):
-    # the layout hotpot_context trains on, so an OOD prompt differs only in content
+def _context_prompt(system_prompt, user_template, context: str, question: str,
+                    method: str = "CSR"):
+    # the layout hotpot_context uses for each method, so an OOD prompt differs only in content
     if not context:
         return _messages(system_prompt, question, user_template)
+    if method == "RD":
+        return _messages(system_prompt, f"Context: {context}, Question: {question}",
+                         user_template)
     return _messages(system_prompt, f"Context:\n{context}\n\nQuestion: {question}")
 
 
@@ -172,7 +176,8 @@ def _musique(example, system_prompt, user_template, method: str = "CSR"):
     gold = [str(example.get("answer", ""))] + [str(a) for a in aliases]
     prompt = (_rlcr_problem(system_prompt, user_template, bodies, question)
               if method == "RLCR" else
-              _context_prompt(system_prompt, user_template, "\n\n".join(blocks), question))
+              _context_prompt(system_prompt, user_template, "\n\n".join(blocks), question,
+                              method))
     return {
         "prompt": prompt,
         "question": question,
@@ -198,7 +203,8 @@ def _twowiki(example, system_prompt, user_template, method: str = "CSR"):
             bodies.append(body)
     prompt = (_rlcr_problem(system_prompt, user_template, bodies, question)
               if method == "RLCR" else
-              _context_prompt(system_prompt, user_template, "\n\n".join(blocks), question))
+              _context_prompt(system_prompt, user_template, "\n\n".join(blocks), question,
+                              method))
     return {
         "prompt": prompt,
         "question": question,
@@ -268,7 +274,7 @@ def load_split(cfg, split: str = "eval", size: int | None = None):
         print(f"[data] split {requested!r} unavailable, using {split_name!r}")
 
     builder = BUILDERS[name]
-    # RLCR gets its own layout on every context dataset; RD only on hotpot_context
+    # RLCR and RD keep their own layouts on every context dataset
     if name in METHOD_AWARE_BUILDERS:
         builder = partial(builder, method=method_name)
     dataset = raw[split_name].map(
